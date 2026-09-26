@@ -1,5 +1,5 @@
 name: Publish to Chrome Web Store
-description: Upload a Chrome extension ZIP and submit it for review with the Chrome Web Store API v2. No dependencies.
+description: Upload a Chrome extension ZIP or signed CRX and submit it for review with the Chrome Web Store API v2. No dependencies.
 author: Hamza Hamidi
 
 branding:
@@ -50,7 +50,7 @@ outputs:
   state:
     description: Store state of this version when the action finished, such as PENDING_REVIEW, STAGED or PUBLISHED. Empty when result is uploaded or dry-run, or when the store reports no state after submitting.
   version:
-    description: Version read from manifest.json in the ZIP.
+    description: Version read from manifest.json in the ZIP, or in the ZIP inside the CRX.
 
 runs:
   using: node24

@@ -393,6 +393,14 @@ describe('publishToStore', () => {
     assert.match(error.details ?? '', /signed with the key registered on its Package tab/);
   });
 
+  it('never tells a CRX upload to use the crx input', async () => {
+    store.on(FETCH, storeStatus({ published: '1.0.0' }));
+    store.on(UPLOAD, { status: 400, body: { error: { code: 400, message: 'PKG_MUST_UPDATE_AS_CRX: You must update your item with a crx package.' } } });
+    const error = await rejection(publish('1.0.1', { crxFileName: 'ext.crx' }));
+    assert.doesNotMatch(error.details ?? '', /Pass it through the crx input/);
+    assert.match(error.details ?? '', /Package tab/);
+  });
+
   it('explains a CRX upload that ends in FAILED', async () => {
     store.on(FETCH, storeStatus({ published: '1.0.0' }));
     store.on(UPLOAD, { body: { uploadState: 'FAILED' } });

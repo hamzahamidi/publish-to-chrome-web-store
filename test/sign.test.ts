@@ -67,6 +67,11 @@ describe('packCrx', () => {
     assert.match(crxId, /^[a-p]{32}$/);
   });
 
+  it('names an encrypted key instead of calling it invalid', () => {
+    const encrypted = generateKeyPairSync('rsa', { modulusLength: 2048, privateKeyEncoding: { type: 'pkcs8', format: 'pem', cipher: 'aes-256-cbc', passphrase: 'x' }, publicKeyEncoding: { type: 'spki', format: 'pem' } });
+    assert.throws(() => packCrx(zip, encrypted.privateKey), (error) => error instanceof ActionError && /The private key is encrypted/.test(error.message));
+  });
+
   it('refuses a key that is not RSA, or not a key at all', () => {
     const ec = generateKeyPairSync('ec', { namedCurve: 'P-256', privateKeyEncoding: { type: 'pkcs8', format: 'pem' }, publicKeyEncoding: { type: 'spki', format: 'pem' } });
     assert.throws(() => packCrx(zip, ec.privateKey), (error) => error instanceof ActionError && /is ec, and the Chrome Web Store needs an RSA key/.test(error.message));
@@ -102,6 +107,18 @@ describe('sign action', () => {
     assert.ok(!printed.includes('PRIVATE KEY'), 'the key must not be printed');
   });
 
+  it('creates the output folder, and refuses a CRX given as the ZIP', async () => {
+    const zipPath = join(dir, 'plain.zip');
+    writeFileSync(zipPath, extensionZip('1.1'));
+    const nested = join(dir, 'out', 'deep', 'plain.crx');
+    const run = await runSign({ zip: zipPath, crx: nested, 'private-key': privateKey });
+    assert.equal(run.code, 0, run.stdout);
+    assert.ok(existsSync(nested));
+    const again = await runSign({ zip: nested, crx: join(dir, 'twice.crx'), 'private-key': privateKey });
+    assert.equal(again.code, 1);
+    assert.match(again.stdout, /is already a CRX package\. Pass the extension ZIP to sign, or give this CRX to the publish action's crx input\./);
+  });
+
   it('refuses a ZIP without a manifest at its root before signing', async () => {
     const zipPath = join(dir, 'nested.zip');
     writeFileSync(zipPath, makeZip([{ name: 'dist/manifest.json', data: '{"version":"1.0"}' }]));
@@ -116,6 +133,8 @@ describe('sign action', () => {
     writeFileSync(zipPath, extensionZip('1.0'));
     assert.match((await runSign({ zip: zipPath })).stdout, /Input private-key is required\./);
     assert.match((await runSign({ zip: join(dir, 'none.zip'), 'private-key': privateKey })).stdout, /no such file/);
-    assert.match((await runSign({ zip: zipPath, crx: zipPath, 'private-key': privateKey })).stdout, /Input crx must differ from zip\./);
+    assert.match((await runSign({ zip: zipPath, crx: zipPath, 'private-key': privateKey })).stdout, /Input crx must name a different file than zip\./);
+    assert.match((await runSign({ zip: zipPath, crx: join(dir, '.', 'ext.zip'), 'private-key': privateKey })).stdout, /Input crx must name a different file than zip\./);
+    assert.equal(readFileSync(zipPath).length, extensionZip('1.0').length);
   });
 });

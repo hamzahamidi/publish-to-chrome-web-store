@@ -93,7 +93,7 @@ describe('readManifest', () => {
     const header = Buffer.alloc(12);
     header.write('Cr24', 0, 'latin1');
     header.writeUInt32LE(3, 4);
-    fails(Buffer.concat([header, extensionZip('1.0')]), /is a CRX package, not a ZIP\. Pass a signed CRX through the crx input instead\./);
+    fails(Buffer.concat([header, extensionZip('1.0')]), /is a CRX package, not a ZIP\.$/);
   });
 
   it('refuses ZIP64 archives', () => {

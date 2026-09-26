@@ -7,7 +7,7 @@ inputs:
     description: Path to the extension ZIP, with manifest.json at its root.
     required: true
   private-key:
-    description: The RSA private key registered for Verified CRX Uploads, as PEM. Pass it from a secret, in a job that holds no store token.
+    description: The RSA private key registered for Verified CRX Uploads, as unencrypted PEM (PKCS#8 or PKCS#1) with its BEGIN and END lines. Pass it from an environment secret, in a job that holds no store token.
     required: true
   crx:
     description: Where to write the CRX. Defaults to the ZIP path with a .crx extension.

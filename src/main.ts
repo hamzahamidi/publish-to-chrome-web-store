@@ -1,6 +1,6 @@
 import { readFileSync, statSync } from 'node:fs';
 import { basename } from 'node:path';
-import { crxArchive } from './crx.ts';
+import { crxArchive, isCrx } from './crx.ts';
 import { ActionError } from './errors.ts';
 import { error, getBooleanInput, getInput, info, mask, setOutput, warning } from './runner.ts';
 import { type PublishType, publishToStore, STORE_API } from './store.ts';
@@ -70,6 +70,7 @@ async function main(): Promise<void> {
     const { code, message } = cause as NodeJS.ErrnoException;
     throw new ActionError(`Cannot read ${label}: ${code === 'ENOENT' ? 'no such file' : message}.`);
   }
+  if (!crxPath && isCrx(packageFile)) throw new ActionError(`${label} is a CRX package, not a ZIP. Pass a signed CRX through the crx input instead.`);
   const { version } = readManifest(crxPath ? crxArchive(packageFile, label) : packageFile, label);
   const crxFileName = crxPath ? crxUploadName(crxPath) : undefined;
 

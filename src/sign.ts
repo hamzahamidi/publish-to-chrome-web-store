@@ -13,6 +13,9 @@ export function packCrx(archive: Buffer, privateKeyPem: string): SignedCrx {
   try {
     key = createPrivateKey(privateKeyPem);
   } catch {
+    if (/-----BEGIN ENCRYPTED PRIVATE KEY-----|Proc-Type:\s*4,ENCRYPTED/.test(privateKeyPem)) {
+      throw new ActionError('The private key is encrypted. Pass it unencrypted, for example the output of `openssl pkey -in key.pem`.');
+    }
     throw new ActionError('The private key is not a PEM private key.');
   }
   if (key.asymmetricKeyType !== 'rsa') throw new ActionError(`The private key is ${key.asymmetricKeyType ?? 'not RSA'}, and the Chrome Web Store needs an RSA key.`);

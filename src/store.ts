@@ -147,7 +147,7 @@ export async function publishToStore({
       const detailReason = details.map((detail) => detail?.reason).find((each): each is string => typeof each === 'string');
       const retryable = RETRYABLE_STATUSES.has(response.status);
       const fallback = retryable ? (method === 'POST' ? RERUN_HINT : undefined) : hint;
-      const crxHint = MUST_USE_CRX.test(text) ? USE_CRX_HINT : undefined;
+      const crxHint = !crxFileName && MUST_USE_CRX.test(text) ? USE_CRX_HINT : undefined;
       throw new ActionError(`${method} ${path} returned HTTP ${response.status}: ${reason}`, crxHint || (detailReason && REASON_HINTS[detailReason]) || STATUS_HINTS[response.status] || fallback, { retryable });
     }
     if (body === undefined || body === null || typeof body !== 'object') {
@@ -261,7 +261,7 @@ export async function publishToStore({
   }
   if (state !== 'SUCCEEDED') {
     const response = JSON.stringify(last).slice(0, 2000);
-    const hint = MUST_USE_CRX.test(response) ? USE_CRX_HINT : crxFileName ? CRX_REFUSED_HINT : undefined;
+    const hint = crxFileName ? CRX_REFUSED_HINT : MUST_USE_CRX.test(response) ? USE_CRX_HINT : undefined;
     throw new ActionError(`Upload of version ${version} ended in state ${state ?? 'unknown'}.`, [`Store response: ${response}`, hint].filter(Boolean).join('\n'));
   }
   log(`Uploaded version ${version}.`);
