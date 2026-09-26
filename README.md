@@ -87,7 +87,7 @@ The one-time Google Cloud setup is described in [Setting up Workload Identity Fe
 
 [Verified CRX Uploads](https://developer.chrome.com/docs/webstore/update#opt-in-to-verified-crx-uploads) make the store accept only packages signed with your own RSA key, so a leaked store token alone cannot publish. It is per item and optional; without it, keep using `zip`.
 
-The `crx` upload sends the headers Google documents, and `sign` matches Chrome's packer byte for byte for the same ZIP, but this path has not yet uploaded to a live opted-in item. After opting in, the dashboard still accepts a manual upload of the same CRX.
+The `crx` upload sends the headers Google documents, and `sign` matches Chrome's packer byte for byte for the same ZIP. After opting in, the dashboard still accepts a manual upload of the same CRX.
 
 1. Create the key pair and register the public half. Google's page shows `openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out privatekey.pem` and `openssl rsa -in privatekey.pem -pubout`. On the item's Package tab, click Opt In under Verified CRX Uploads and paste the public key.
 2. Create an environment named `crx-signing` with a deployment rule that only allows your release tags, and a required reviewer where your plan allows one. Store the whole unencrypted `privatekey.pem`, BEGIN and END lines included, as its environment secret: `gh secret set CRX_PRIVATE_KEY --env crx-signing --repo OWNER/REPO < privatekey.pem`. Use an environment secret rather than a repository secret, because anyone with write access can read repository secrets from any branch. Keep it out of `chrome-web-store`: the provider condition only issues the store token to that environment, so a job in `crx-signing` can never get it.
@@ -415,7 +415,7 @@ Yes. Private repositories work; only the approval environment depends on your Gi
 
 ### Can I use Verified CRX Uploads?
 
-Yes, optionally, though the CRX upload has not yet run against a live opted-in item. Opt the item in on its Package tab, sign with the `sign` action in its own environment, and pass the CRX through `crx`. See [With Verified CRX Uploads](#with-verified-crx-uploads-optional).
+Yes, optionally. Opt the item in on its Package tab, sign with the `sign` action in its own environment, and pass the CRX through `crx`. See [With Verified CRX Uploads](#with-verified-crx-uploads-optional).
 
 ### Is it made by Google?
 
