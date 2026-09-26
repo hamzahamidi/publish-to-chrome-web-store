@@ -17,6 +17,9 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v7
         with:
@@ -27,6 +30,14 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      - name: Upload coverage to Codecov
+        # Fork pull requests receive no id-token, so an OIDC upload from them can only fail.
+        if: matrix.os == 'ubuntu-latest' && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository)
+        uses: codecov/codecov-action@v7
+        with:
+          use_oidc: true
+          files: ./lcov.info
+          fail_ci_if_error: true
 
   action:
     name: Action against a mock store
