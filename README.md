@@ -87,7 +87,7 @@ The one-time Google Cloud setup is described in [Setting up Workload Identity Fe
 
 [Verified CRX Uploads](https://developer.chrome.com/docs/webstore/update#opt-in-to-verified-crx-uploads) make the store accept only packages signed with your own RSA key, so a leaked store token alone cannot publish. It is per item and optional; without it, keep using `zip`.
 
-The `crx` upload sends the headers Google documents, and `sign` matches Chrome's packer byte for byte for the same ZIP, but this path has not yet uploaded to a live opted-in item. After opting in, the dashboard still accepts a manual upload of the same CRX.
+The `crx` upload sends the headers Google documents, and `sign` matches Chrome's packer byte for byte for the same ZIP. After opting in, the dashboard still accepts a manual upload of the same CRX.
 
 1. Create the key pair and register the public half. Google's page shows `openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out privatekey.pem` and `openssl rsa -in privatekey.pem -pubout`. On the item's Package tab, click Opt In under Verified CRX Uploads and paste the public key.
 2. Create an environment named `crx-signing` with a deployment rule that only allows your release tags, and a required reviewer where your plan allows one. Store the whole unencrypted `privatekey.pem`, BEGIN and END lines included, as its environment secret: `gh secret set CRX_PRIVATE_KEY --env crx-signing --repo OWNER/REPO < privatekey.pem`. Use an environment secret rather than a repository secret, because anyone with write access can read repository secrets from any branch. Keep it out of `chrome-web-store`: the provider condition only issues the store token to that environment, so a job in `crx-signing` can never get it.
@@ -217,7 +217,7 @@ A service account key also works. Grant the service account `roles/iam.serviceAc
 | --- | --- |
 | `result` | `submitted`, `uploaded` (when `publish` is `false`), `skipped` (this version was already in the store, or its rollout already reached `deploy-percentage`), `raised` (the rollout of the published version went up) or `dry-run` (a dry run that would upload or raise) |
 | `state` | Store state of this version at the end, such as `PENDING_REVIEW`, `STAGED` or `PUBLISHED`. Empty when `result` is `uploaded`, or `dry-run` for an upload, or when the store reports no state after submitting |
-| `version` | The version read from `manifest.json` in the ZIP, or with `rollout-only` the newest published version |
+| `version` | The version read from `manifest.json` in the ZIP, or in the ZIP inside the CRX, or with `rollout-only` the newest published version |
 
 ## What it does
 
@@ -365,7 +365,7 @@ The hosts are fixed in the code. There is no input to change them, redirects are
 
 ### How it is checked
 
-- Every pull request type-checks the code and runs the tests on Linux, Windows and macOS with a coverage floor of 95% of lines. The tests start the action's entry point against a mock store on all three, and a separate job runs the action from `action.yml`. See [ci.yml](.github/workflows/ci.yml).
+- Every pull request type-checks the code and runs the tests on Linux, Windows and macOS with a coverage floor of 95% of lines. The tests start the action's entry point against a mock store on all three, and two separate jobs run the action from `action.yml`: one uploads a ZIP, the other signs a CRX with `sign/action.yml` and uploads it. See [ci.yml](.github/workflows/ci.yml).
 - [CodeQL](.github/workflows/codeql.yml) scans the JavaScript and the workflows on every pull request, every push to `main` and weekly. Dependabot keeps the workflow actions current.
 - Releases are immutable: once `v1.0.0` is published, its tag and contents cannot change. `v1` points at the newest `1.x` release. [The workflow that moves it](.github/workflows/major-tag.yml) always points `v1` at the highest `1.x.y` release, refuses one that is not immutable, and runs one release at a time. If your organization requires full commit SHAs, pin the commit of a release.
 
@@ -381,7 +381,6 @@ What this action does not do:
 
 - It does not publish a staged version or cancel a pending review. Do both in the dashboard.
 - It refuses ZIP64 archives, and gives the upload request 10 minutes to finish.
-- The CRX upload follows Google's documented headers, and for the same ZIP `sign` writes the same bytes as Chrome's packer, but the CRX path has not yet uploaded to a live opted-in item.
 
 What the Chrome Web Store imposes on any publishing tool:
 
@@ -416,7 +415,7 @@ Yes. Private repositories work; only the approval environment depends on your Gi
 
 ### Can I use Verified CRX Uploads?
 
-Yes, optionally, though the CRX upload has not yet run against a live opted-in item. Opt the item in on its Package tab, sign with the `sign` action in its own environment, and pass the CRX through `crx`. See [With Verified CRX Uploads](#with-verified-crx-uploads-optional).
+Yes, optionally. Opt the item in on its Package tab, sign with the `sign` action in its own environment, and pass the CRX through `crx`. See [With Verified CRX Uploads](#with-verified-crx-uploads-optional).
 
 ### Is it made by Google?
 
