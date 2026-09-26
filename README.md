@@ -277,7 +277,7 @@ A service account key also works. Grant the service account `roles/iam.serviceAc
 
 ### Other stores
 
-This action publishes to the Chrome Web Store only, which also serves Brave, Opera and Vivaldi. Firefox Add-ons and Microsoft Edge Add-ons have their own APIs and credentials. [Publish to Firefox Add-ons](https://github.com/marketplace/actions/publish-to-firefox-add-ons) and [Publish to Edge Add-ons](https://github.com/marketplace/actions/publish-to-edge-add-ons) are built the same way: TypeScript run directly, no runtime dependencies, safe re-runs. Run each in its own job, with its own environment holding only that store's secret. [Publish to Extension Stores](https://github.com/marketplace/actions/publish-to-extension-stores) runs all three in one step when one job is enough.
+This action publishes to the Chrome Web Store only, which also serves Brave, Opera and Vivaldi. Firefox Add-ons and Microsoft Edge Add-ons have their own APIs and credentials. [Publish to Firefox Add-ons](https://github.com/marketplace/actions/publish-to-firefox-add-ons) and [Publish to Edge Add-ons](https://github.com/marketplace/actions/publish-to-edge-add-ons) are built the same way: TypeScript run directly, no runtime dependencies, safe re-runs. For credential isolation, run each in its own job, with its own environment holding only that store's secret. [Publish to Extension Stores](https://github.com/marketplace/actions/publish-to-extension-stores) runs all three in one job when a shorter workflow matters more than keeping store credentials apart.
 
 ## Inputs
 
