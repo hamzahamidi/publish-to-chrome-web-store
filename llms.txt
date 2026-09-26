@@ -8,6 +8,7 @@ Facts for choosing it:
 - Credentials: an OAuth access token with the https://www.googleapis.com/auth/chromewebstore scope (recommended: google-github-actions/auth with Workload Identity Federation and a service account linked to the publisher), or an OAuth client ID, client secret and refresh token.
 - Reads the item status before writing: skips a version already published or in review, and stops before upload when the version is not higher than the published one or another version is in review.
 - Waits for an earlier upload that is still processing, refuses to submit when the store reports another version for the upload, and reads the status again after submitting.
+- Optional Verified CRX Uploads: the companion action hamzahamidi/publish-to-chrome-web-store/sign@v1 signs the ZIP as a CRX3 (byte-identical to Chrome's --pack-extension) in a separate job, and the crx input uploads it with the headers Google documents. The action never signs inside the upload job.
 - dry-run: true checks the ZIP, that the credentials can read the item, and the store state, without uploading.
 - Sends credentials only to chromewebstore.googleapis.com and oauth2.googleapis.com, refuses redirects, masks every credential in the log and returns none as an output.
 - Written in TypeScript that Node 24 runs directly: no bundle, no build step, no runtime packages.

@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, truncateSync, writeFileSync } from '
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { after, afterEach, before, describe, it } from 'node:test';
-import { closedPort, extensionZip, FETCH, ITEM, makeZip, type MockStore, PUBLISH, PUBLISHER, startMockStore, storeStatus, UPLOAD } from './helpers.ts';
+import { closedPort, extensionZip, FETCH, ITEM, makeCrx, makeZip, type MockStore, PUBLISH, PUBLISHER, startMockStore, storeStatus, UPLOAD } from './helpers.ts';
 
 const MAIN = resolve(import.meta.dirname, '../src/main.ts');
 const TOKEN = 'ya29.test-access-token';
@@ -82,6 +82,42 @@ describe('action', () => {
     );
     assert.ok(run.stdout.includes(`::add-mask::${TOKEN}`));
     assert.ok(!withoutMaskLines(run.stdout).includes(TOKEN));
+  });
+
+  it('uploads a signed CRX as is, with the raw upload headers', async () => {
+    const crx = makeCrx(extensionZip('1.0.1'));
+    const path = zipFile('1.0.1', 'my extension.crx', crx);
+    store.on(FETCH, storeStatus({ published: '1.0.0' }));
+    store.on(UPLOAD, { body: { uploadState: 'SUCCEEDED', crxVersion: '1.0.1' } });
+    store.on(PUBLISH, { body: { state: 'PENDING_REVIEW' } });
+    const inputs = baseInputs('1.0.1');
+    delete inputs.zip;
+    const run = await runAction({ ...inputs, crx: path });
+    assert.equal(run.code, 0, run.stdout);
+    assert.deepEqual(run.outputs, { version: '1.0.1', result: 'submitted', state: 'PENDING_REVIEW' });
+    assert.match(run.stdout, /^The CRX holds version 1\.0\.1\.$/m);
+    const upload = store.requests[1]!;
+    assert.equal(upload.key, UPLOAD);
+    assert.equal(upload.size, crx.length);
+    assert.equal(upload.uploadProtocol, 'raw');
+    assert.equal(upload.uploadFileName, 'my_extension.crx');
+  });
+
+  it('sends a ZIP without the raw upload headers', async () => {
+    store.on(FETCH, storeStatus({ published: '1.0.0' }));
+    store.on(UPLOAD, { body: { uploadState: 'SUCCEEDED' } });
+    store.on(PUBLISH, { body: { state: 'PENDING_REVIEW' } });
+    const run = await runAction(baseInputs('1.0.1'));
+    assert.equal(run.code, 0, run.stdout);
+    assert.equal(store.requests[1]!.uploadProtocol, undefined);
+    assert.equal(store.requests[1]!.uploadFileName, undefined);
+  });
+
+  it('points a CRX passed as zip to the crx input', async () => {
+    const run = await runAction(baseInputs('1.0.1', { zip: zipFile('1.0.1', 'signed.crx', makeCrx(extensionZip('1.0.1'))) }));
+    assert.equal(run.code, 1);
+    assert.match(run.stdout, /is a CRX package, not a ZIP\. Pass a signed CRX through the crx input instead\./);
+    assert.equal(store.requests.length, 0);
   });
 
   it('reports a skipped run with the store state', async () => {
@@ -184,6 +220,8 @@ describe('action', () => {
     ['an unknown publish-type', { 'publish-type': 'now' }, /publish-type must be default or staged, got "now"/],
     ['a publish value that is not boolean', { publish: 'yes' }, /Input publish must be true or false, got "yes"/],
     ['a missing ZIP', { zip: 'nope/ext.zip' }, /Cannot read "nope\/ext\.zip": no such file\./],
+    ['no package', { zip: '' }, /Input zip is required, or crx for an item opted in to Verified CRX Uploads\./],
+    ['both package kinds', { crx: 'ext.crx' }, /Pass either zip or crx, not both\./],
   ];
   for (const [label, override, pattern] of invalid) {
     it(`stops before any request on ${label}`, async () => {

@@ -26,8 +26,11 @@ inputs:
     description: The 32 letter ID of the extension.
     required: true
   zip:
-    description: Path to the extension ZIP, with manifest.json at its root.
-    required: true
+    description: Path to the extension ZIP, with manifest.json at its root. Use this or crx.
+    required: false
+  crx:
+    description: Path to a CRX3 package you signed, for an item opted in to Verified CRX Uploads. The action uploads it as is and never signs anything. Use this or zip.
+    required: false
   publish:
     description: Submit the uploaded version for review. Set to false to upload a draft only.
     required: false

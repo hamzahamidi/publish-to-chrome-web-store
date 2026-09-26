@@ -5,7 +5,8 @@ A GitHub Action that publishes a Chrome extension from GitHub Actions: it upload
 - **No stored secret needed.** It takes a short-lived access token, which `google-github-actions/auth` can mint through Workload Identity Federation. Nothing long-lived sits in your repository secrets.
 - **Safe to re-run.** It reads the store status before writing anything. A version that is already published or in review is skipped. A version that the store would refuse, or a review in progress for another version, stops the run with a clear message before anything is uploaded.
 - **Approval before each upload.** The recommended setup only lets an approved job in one GitHub environment obtain the token.
-- **Readable, typed, no runtime dependencies.** About 670 lines of TypeScript in `src/`, importing only Node.js built-ins. Node runs those files as they are: no bundle, no `dist/`, no build step, so what you read is what runs.
+- **Readable, typed, no runtime dependencies.** About 800 lines of TypeScript in `src/` and `sign/`, importing only Node.js built-ins. Node runs those files as they are: no bundle, no `dist/`, no build step, so what you read is what runs.
+- **Verified CRX Uploads, if you opt in.** A companion `sign` action signs the ZIP as a CRX3 in a separate job, byte for byte what Chrome's packer writes, and this action uploads it. The signing key and the store token never meet in one job.
 - **Testable without risk.** `dry-run: true` checks your ZIP, that your credentials can read the item, and the store state, then stops before uploading.
 - **Existing setups work too.** It also accepts an OAuth client ID, client secret and refresh token.
 
@@ -81,6 +82,38 @@ The build runs in its own job, so your build tools and their dependencies never 
 
 The one-time Google Cloud setup is described in [Setting up Workload Identity Federation](#setting-up-workload-identity-federation). With the provider it creates, every run must come from a tag. A run from a branch fails in the `google-github-actions/auth` step, before this action starts, with "The given credential is rejected by the attribute condition".
 
+### With Verified CRX Uploads (optional)
+
+[Verified CRX Uploads](https://developer.chrome.com/docs/webstore/update#opt-in-to-verified-crx-uploads) make the store accept only packages signed with your own RSA key, so a leaked store token alone cannot publish. It is per item and optional; without it, keep using `zip`.
+
+1. Create the key pair and register the public half. Google's page shows `openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out privatekey.pem` and `openssl rsa -in privatekey.pem -pubout`. On the item's Package tab, click Opt In under Verified CRX Uploads and paste the public key.
+2. Store the private key as a repository secret, for example `CRX_PRIVATE_KEY`, and do not keep other copies you do not need. If it is ever lost, Chrome Web Store support replaces the key, which Google says can take up to one week. Opting out is also a support request.
+3. Sign in its own job, then upload the CRX:
+
+```yaml
+  sign:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: extension
+      - id: sign
+        uses: hamzahamidi/publish-to-chrome-web-store/sign@v1
+        with:
+          zip: extension.zip
+          private-key: ${{ secrets.CRX_PRIVATE_KEY }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: extension-crx
+          path: ${{ steps.sign.outputs.crx }}
+```
+
+In the publish job, download `extension-crx` instead of `extension` and pass `crx: extension.crx` instead of `zip`. The `sign` job has no `id-token: write`, so it can never obtain the store token, and the publish job never sees the key.
+
+`sign` writes a CRX3 with one RSA proof, the format Chrome's `--pack-extension` writes; a CI job compares the two byte for byte on every change. It never uploads anything. Keys must be RSA, as the store requires.
+
 ### Trying it first
 
 Add `dry-run: true` to either example. The run reads the ZIP, obtains the token, fetches the item status and prints what a real run would do. It sends nothing to the store except that status request. To start a dry run by hand, give the workflow a `workflow_dispatch` trigger and pick a tag under "Use workflow from".
@@ -112,7 +145,8 @@ A service account key also works. Grant the service account `roles/iam.serviceAc
 | `client-id`, `client-secret`, `refresh-token` | one of the two credential forms | | OAuth client and refresh token, exchanged for an access token at the start of the run |
 | `publisher-id` | yes | | Publisher ID from the Account page of the Developer Dashboard |
 | `item-id` | yes | | The 32 letter extension ID |
-| `zip` | yes | | Path to the extension ZIP, with `manifest.json` at its root |
+| `zip` | one of `zip` or `crx` | | Path to the extension ZIP, with `manifest.json` at its root |
+| `crx` | one of `zip` or `crx` | | Path to a CRX3 you signed, for an item opted in to Verified CRX Uploads. Uploaded as is |
 | `publish` | no | `true` | `false` uploads the package as a draft without submitting it |
 | `dry-run` | no | `false` | `true` stops after the status check and reports what would happen |
 | `publish-type` | no | `default` | `default` makes the version live once it passes review. `staged` holds the approved version until you publish it in the dashboard or with a separate publish call to the API. You have 30 days after approval, then it reverts to a draft and needs a new review. This action does not publish a staged version, even when re-run |
@@ -127,7 +161,7 @@ A service account key also works. Grant the service account `roles/iam.serviceAc
 
 ## What it does
 
-1. Reads `manifest.json` from the ZIP and checks the version, before any network call. A ZIP whose manifest sits in a subfolder is refused with a hint, and so is a CRX file.
+1. Reads `manifest.json` from the ZIP, or from the ZIP inside the CRX, and checks the version, before any network call. A ZIP whose manifest sits in a subfolder is refused with a hint. A CRX passed as `zip` is pointed to `crx`, and a CRX2 or differential CRX is refused.
 2. Fetches the item status and decides:
 
    | Store state | What the action does |
@@ -152,13 +186,13 @@ Store errors are reported with the HTTP status, the store's message and a hint f
 
 Checked on 26 September 2026 from each repository's `action.yml` and `package.json`.
 
-| Action | Store API | Credentials it accepts | Runtime packages | What the runner executes |
-| --- | --- | --- | --- | --- |
-| This action | v2 | Access token (for example from Workload Identity Federation), or OAuth refresh token | None | The TypeScript source in `src/` |
-| [mnao305/chrome-extension-upload](https://github.com/mnao305/chrome-extension-upload) | v2 | OAuth refresh token | 3 | A bundled `dist/index.js` |
-| [wdzeng/chrome-extension](https://github.com/wdzeng/chrome-extension) | v2 | OAuth refresh token | 3 | A bundled `index.cjs` |
-| [cssnr/webstore-publish-action](https://github.com/cssnr/webstore-publish-action) | v2 | Bearer token, or a service account key | 5 | A bundled `dist/index.js` |
-| [PlasmoHQ/bpp](https://github.com/PlasmoHQ/bpp) | v1.1, which stops on 15 October 2026 | OAuth refresh token | None, bundled | `index.js`, declared for Node 20 |
+| Action | Store API | Credentials it accepts | Signed CRX upload | Runtime packages | What the runner executes |
+| --- | --- | --- | --- | --- | --- |
+| This action | v2 | Access token (for example from Workload Identity Federation), or OAuth refresh token | Yes, plus a `sign` action | None | The TypeScript source in `src/` |
+| [mnao305/chrome-extension-upload](https://github.com/mnao305/chrome-extension-upload) | v2 | OAuth refresh token | No: every upload is labeled as a ZIP | 3 | A bundled `dist/index.js` |
+| [wdzeng/chrome-extension](https://github.com/wdzeng/chrome-extension) | v2 | OAuth refresh token | No | 3 | A bundled `index.cjs` |
+| [cssnr/webstore-publish-action](https://github.com/cssnr/webstore-publish-action) | v2 | Bearer token, or a service account key | No | 5 | A bundled `dist/index.js` |
+| [PlasmoHQ/bpp](https://github.com/PlasmoHQ/bpp) | v1.1, which stops on 15 October 2026 | OAuth refresh token | No | None, bundled | `index.js`, declared for Node 20 |
 
 ## Setting up Workload Identity Federation
 
@@ -238,7 +272,7 @@ If you release from a branch instead of tags, replace `assertion.ref_type == 'ta
 | --- | --- |
 | Refresh token flow only | `POST https://oauth2.googleapis.com/token` with the client ID, client secret and refresh token |
 | Always | `GET https://chromewebstore.googleapis.com/v2/publishers/{publisher-id}/items/{item-id}:fetchStatus` |
-| Unless skipped, refused or a dry run | `POST https://chromewebstore.googleapis.com/upload/v2/publishers/{publisher-id}/items/{item-id}:upload` with the ZIP |
+| Unless skipped, refused or a dry run | `POST https://chromewebstore.googleapis.com/upload/v2/publishers/{publisher-id}/items/{item-id}:upload` with the ZIP, or with the CRX plus the `X-Goog-Upload-Protocol: raw` and `X-Goog-Upload-File-Name` headers Google documents for it |
 | While an earlier upload or this one is processing | `GET ...:fetchStatus` again, every 10 seconds, up to 30 times |
 | After a successful upload, unless `publish` is `false` | `POST https://chromewebstore.googleapis.com/v2/publishers/{publisher-id}/items/{item-id}:publish` with `{"publishType": ...}` |
 | After submitting | `GET ...:fetchStatus` once, to confirm which version is in review |
@@ -256,12 +290,14 @@ The hosts are fixed in the code. There is no input to change them, redirects are
 
 | File | Lines | Role |
 | --- | --- | --- |
-| [`src/main.ts`](src/main.ts) | ~110 | Reads and validates inputs, masks secrets, sets outputs |
-| [`src/store.ts`](src/store.ts) | ~290 | The store calls, their response types and the state decisions |
+| [`src/main.ts`](src/main.ts) | ~130 | Reads and validates inputs, masks secrets, sets outputs |
+| [`src/store.ts`](src/store.ts) | ~310 | The store calls, their response types and the state decisions |
 | [`src/zip.ts`](src/zip.ts) | ~130 | Reads `manifest.json` from the ZIP, with checksum verification |
 | [`src/token.ts`](src/token.ts) | ~50 | Refresh token exchange |
 | [`src/runner.ts`](src/runner.ts) | ~50 | GitHub Actions inputs, outputs, masking and annotations |
 | [`src/errors.ts`](src/errors.ts) | ~20 | The error type for failures shown as an error annotation, and network error wording |
+| [`src/crx.ts`](src/crx.ts) | ~30 | Finds the ZIP inside a CRX3, refusing CRX2 and damaged headers |
+| [`src/sign.ts`](src/sign.ts), [`sign/main.ts`](sign/main.ts) | ~50, ~40 | The `sign` action: CRX3 signing with one RSA proof |
 
 ### How it is checked
 
@@ -279,7 +315,7 @@ Report a vulnerability as described in [SECURITY.md](SECURITY.md).
 
 - The API cannot create an item or change its visibility. After you change visibility in the dashboard, publish once by hand with the new visibility: until then the API cannot publish ([Google's note](https://developer.chrome.com/docs/webstore/using-api)).
 - One service account per publisher, shared by all its extensions.
-- Items opted in to Verified CRX Uploads are not supported: the store requires a signed CRX for them, and this action uploads ZIP packages only.
+- The CRX upload follows Google's documented headers, and `sign` matches Chrome's packer byte for byte, but the CRX path has not yet uploaded to a live opted-in item.
 - Packages up to 2 GB, the store's limit. The upload request has 10 minutes to finish. ZIP64 archives are not supported.
 - Partial rollout (`deployPercentage`), skipping review and `blockOnWarnings` are not exposed.
 
@@ -306,6 +342,10 @@ Yes. `dry-run: true` reads the ZIP, obtains the token and fetches the item statu
 ### Does it work with private repositories and other operating systems?
 
 Yes. Private repositories work; only the approval environment depends on your GitHub plan. The tests run the action on Linux, Windows and macOS runners.
+
+### Can I use Verified CRX Uploads?
+
+Yes, optionally. Opt the item in on its Package tab, sign with the `sign` action in its own job, and pass the CRX through `crx`. See [With Verified CRX Uploads](#with-verified-crx-uploads-optional).
 
 ### Is it made by Google?
 

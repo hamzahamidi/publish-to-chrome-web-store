@@ -377,6 +377,29 @@ describe('publishToStore', () => {
     assert.deepEqual(calls(), [FETCH, UPLOAD]);
   });
 
+  it('points to the crx input when an opted-in item refuses a ZIP', async () => {
+    store.on(FETCH, storeStatus({ published: '1.0.0' }));
+    store.on(UPLOAD, { status: 400, body: { error: { code: 400, message: 'PKG_MUST_UPDATE_AS_CRX: You must update your item with a crx package.' } } });
+    const error = await rejection(publish('1.0.1'));
+    assert.match(error.details ?? '', /opted in to Verified CRX Uploads, so the store only accepts a CRX signed with your key\. Pass it through the crx input\./);
+  });
+
+  it('sends a CRX with the raw upload headers and explains a refused CRX', async () => {
+    store.on(FETCH, storeStatus({ published: '1.0.0' }));
+    store.on(UPLOAD, { status: 400, body: { error: { code: 400, message: 'The uploaded package was invalid.' } } });
+    const error = await rejection(publish('1.0.1', { crxFileName: 'ext.crx' }));
+    assert.equal(store.requests[1]!.uploadProtocol, 'raw');
+    assert.equal(store.requests[1]!.uploadFileName, 'ext.crx');
+    assert.match(error.details ?? '', /signed with the key registered on its Package tab/);
+  });
+
+  it('explains a CRX upload that ends in FAILED', async () => {
+    store.on(FETCH, storeStatus({ published: '1.0.0' }));
+    store.on(UPLOAD, { body: { uploadState: 'FAILED' } });
+    const error = await rejection(publish('1.0.1', { crxFileName: 'ext.crx' }));
+    assert.match(error.details ?? '', /^Store response: .*\n.*Package tab\.$/s);
+  });
+
   it('passes store warnings on', async () => {
     store.on(FETCH, storeStatus());
     store.on(UPLOAD, { body: { uploadState: 'SUCCEEDED' } });

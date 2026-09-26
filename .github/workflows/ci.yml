@@ -54,3 +54,49 @@ jobs:
           STATE: ${{ steps.publish.outputs.state }}
           VERSION: ${{ steps.publish.outputs.version }}
         run: node test/self-test.ts verify
+
+  chrome-packer:
+    name: Signing matches Chrome's packer
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: node test/chrome-compat.ts
+
+  crx-action:
+    name: Sign and upload a CRX against a mock store
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Start the mock store and make a throwaway signing key
+        run: node test/self-test.ts start-crx
+      - id: sign
+        uses: ./sign
+        with:
+          zip: self-test.zip
+          private-key: ${{ env.SELF_TEST_KEY }}
+      - id: publish
+        uses: ./
+        with:
+          access-token: self-test-token
+          publisher-id: pub-1
+          item-id: abcdefghijklmnopabcdefghijklmnop
+          crx: ${{ steps.sign.outputs.crx }}
+      - name: Check the calls and outputs
+        env:
+          RESULT: ${{ steps.publish.outputs.result }}
+          STATE: ${{ steps.publish.outputs.state }}
+          VERSION: ${{ steps.publish.outputs.version }}
+        run: node test/self-test.ts verify-crx
+
