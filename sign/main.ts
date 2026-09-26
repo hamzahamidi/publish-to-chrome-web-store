@@ -14,8 +14,10 @@ function main(): void {
 
   let zip: Buffer;
   try {
+    if (!statSync(zipPath).isFile()) throw new ActionError(`${JSON.stringify(zipPath)} is not a regular file.`);
     zip = readFileSync(zipPath);
   } catch (cause) {
+    if (cause instanceof ActionError) throw cause;
     const { code, message } = cause as NodeJS.ErrnoException;
     throw new ActionError(`Cannot read ${JSON.stringify(zipPath)}: ${code === 'ENOENT' ? 'no such file' : message}.`);
   }

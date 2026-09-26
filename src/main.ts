@@ -81,8 +81,9 @@ async function main(): Promise<void> {
   let version = '';
   if (packagePath) {
     try {
-      const { size } = statSync(packagePath);
-      if (size > MAX_PACKAGE_BYTES) throw new ActionError(`${label} is larger than 2 GB, the largest package the Chrome Web Store accepts.`);
+      const stat = statSync(packagePath);
+      if (!stat.isFile()) throw new ActionError(`${label} is not a regular file.`);
+      if (stat.size > MAX_PACKAGE_BYTES) throw new ActionError(`${label} is larger than 2 GB, the largest package the Chrome Web Store accepts.`);
       packageFile = readFileSync(packagePath);
     } catch (cause) {
       if (cause instanceof ActionError) throw cause;
