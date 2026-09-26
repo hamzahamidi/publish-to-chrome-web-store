@@ -1,5 +1,5 @@
 name: Publish to Chrome Web Store
-description: Publish Chrome extensions through the Chrome Web Store API v2 using a short-lived token, with no publishing secret to store.
+description: Publish Chrome extensions with the Chrome Web Store API v2. Accepts a short-lived token, so no publishing secret is needed.
 author: Hamza Hamidi
 
 branding:
