@@ -344,6 +344,39 @@ describe('publishToStore', () => {
     assert.deepEqual(run.warnings, ['Chrome Web Store warning: check the listing']);
   });
 
+  it('waits for an earlier upload that is still processing before uploading', async () => {
+    store.on(FETCH, storeStatus({ published: '1.0.0', lastAsyncUploadState: 'IN_PROGRESS' }), storeStatus({ published: '1.0.0', lastAsyncUploadState: 'FAILED' }));
+    store.on(UPLOAD, { body: { uploadState: 'SUCCEEDED', crxVersion: '1.0.1' } });
+    store.on(PUBLISH, { body: { state: 'PENDING_REVIEW' } });
+    const run = publish('1.0.1');
+    assert.equal((await run).result, 'submitted');
+    assert.deepEqual(calls(), [FETCH, FETCH, UPLOAD, PUBLISH, FETCH]);
+    assert.ok(run.lines.includes('An earlier upload is processing, checking again in 0 s.'));
+  });
+
+  it('uploads nothing while an earlier upload never finishes processing', async () => {
+    store.on(FETCH, storeStatus({ published: '1.0.0', lastAsyncUploadState: 'IN_PROGRESS' }));
+    const error = await rejection(publish('1.0.1'));
+    assert.match(error.message, /^An earlier upload was still processing after \d+ s, so this run uploaded nothing\.$/);
+    assert.ok(!calls().includes(UPLOAD));
+  });
+
+  it('mentions an earlier upload in progress on a dry run without waiting for it', async () => {
+    store.on(FETCH, storeStatus({ published: '1.0.0', lastAsyncUploadState: 'IN_PROGRESS' }));
+    const run = publish('1.0.1', { dryRun: true });
+    assert.equal((await run).result, 'dry-run');
+    assert.deepEqual(calls(), [FETCH]);
+    assert.ok(run.lines.includes('An earlier upload is still processing in the store. A real run would wait for it before uploading.'));
+  });
+
+  it('refuses to submit when the store accepted a package with another version', async () => {
+    store.on(FETCH, storeStatus({ published: '1.0.0' }));
+    store.on(UPLOAD, { body: { uploadState: 'SUCCEEDED', crxVersion: '1.0.2' } });
+    const error = await rejection(publish('1.0.1'));
+    assert.equal(error.message, 'The store accepted a package with version 1.0.2, not 1.0.1. This run did not submit it.');
+    assert.deepEqual(calls(), [FETCH, UPLOAD]);
+  });
+
   it('passes store warnings on', async () => {
     store.on(FETCH, storeStatus());
     store.on(UPLOAD, { body: { uploadState: 'SUCCEEDED' } });

@@ -3,8 +3,9 @@
 A GitHub Action that uploads a Chrome extension ZIP to the Chrome Web Store and submits it for review, through the Chrome Web Store API v2.
 
 - **No stored secret needed.** It takes a short-lived access token, which `google-github-actions/auth` can mint through Workload Identity Federation. Nothing long-lived sits in your repository secrets.
-- **Safe to re-run.** It reads the store status before writing anything. A version that is already published or in review is skipped. A version that the store would refuse, or a review in progress for another version, stops the run with a clear message before anything is uploaded. After submitting, it reads the status again to confirm which version went to review.
-- **Readable and dependency free.** About 500 lines of plain JavaScript in `src/`, importing only Node.js built-ins. What you read is what runs: no bundle, no `node_modules`, no build step.
+- **Safe to re-run.** It reads the store status before writing anything. A version that is already published or in review is skipped. A version that the store would refuse, or a review in progress for another version, stops the run with a clear message before anything is uploaded.
+- **Approval before each upload.** The recommended setup only lets an approved job in one GitHub environment obtain the token.
+- **Readable and dependency free.** About 550 lines of plain JavaScript in `src/`, importing only Node.js built-ins. What you read is what runs: no bundle, no `node_modules`, no build step.
 - **Testable without risk.** `dry-run: true` checks your ZIP, that your credentials can read the item, and the store state, then stops before uploading.
 - **Existing setups work too.** It also accepts an OAuth client ID, client secret and refresh token.
 
@@ -18,6 +19,7 @@ Not affiliated with or endorsed by Google. Chrome Web Store is a trademark of Go
 - Google requires 2-step verification on the account that owns the publisher.
 - Every release needs a `version` in `manifest.json` higher than the published one. The action stops before uploading when it is not.
 - The ZIP holds the contents of your extension folder, with `manifest.json` at its root, not the folder itself.
+- One writer per item. The API submits whichever package was uploaded last and has no way to submit a specific one, so nothing else should upload to the same item while a run is going: not the dashboard, not another workflow. The action detects a competing upload, but only after the fact.
 
 ## Usage
 
@@ -47,6 +49,7 @@ jobs:
   publish:
     needs: build
     runs-on: ubuntu-latest
+    environment: chrome-web-store
     permissions:
       id-token: write
     concurrency:
@@ -74,7 +77,7 @@ jobs:
           zip: extension.zip
 ```
 
-The build runs in its own job, so your build tools and their dependencies never run next to the store token. The publish job only downloads the ZIP, gets the token and runs this action. The concurrency group keeps two releases from uploading at the same time, because the store submits whichever package was uploaded last.
+The build runs in its own job, so your build tools and their dependencies never run next to the store token. The publish job only downloads the ZIP, gets the token and runs this action. It waits for approval in the `chrome-web-store` environment, and the concurrency group keeps two releases from uploading at the same time.
 
 The one-time Google Cloud setup is described in [Setting up Workload Identity Federation](#setting-up-workload-identity-federation). With the provider it creates, every run must come from a tag. A run from a branch fails in the `google-github-actions/auth` step, before this action starts, with "The given credential is rejected by the attribute condition".
 
@@ -139,9 +142,9 @@ A service account key also works. Grant the service account `roles/iam.serviceAc
    A taken down item or one with a policy warning gets a warning in the log, and the run continues.
 
 3. Stops here on a dry run.
-4. Uploads the ZIP, then checks the status every 10 seconds, up to 30 times, while the store processes it. A check that fails with a network error or HTTP 429, 500, 502, 503 or 504 counts as one of the 30, and three such failures in a row end the run. If processing takes longer, the run fails without submitting. The store may still finish the package as a draft, or the upload may fail, so check the dashboard before re-running.
+4. Waits first if an earlier upload is still processing. Then uploads the ZIP, stops if the store reports a different version for it, and checks the status every 10 seconds, up to 30 times, while the store processes it. A check that fails with a network error or HTTP 429, 500, 502, 503 or 504 counts as one of the 30, and three such failures in a row end the run. If processing takes longer, the run fails without submitting. The store may still finish the package as a draft, or the upload may fail, so check the dashboard before re-running.
 5. Submits the version for review, unless `publish` is `false`. Warnings the store returns appear as warning annotations.
-6. Reads the status once more. If a different version is now in review, another run replaced the package before this one submitted it, and the run fails.
+6. Reads the status once more. If a different version is now in review, another writer replaced the package before this run submitted it. The run fails to report that, but the other package is already submitted.
 
 Store errors are reported with the HTTP status, the store's message and a hint for the common causes.
 
@@ -170,7 +173,7 @@ gcloud services enable chromewebstore.googleapis.com iam.googleapis.com iamcrede
 gcloud iam service-accounts create cws-publisher --display-name="Chrome Web Store publisher"
 ```
 
-**4. Create an identity pool and a GitHub provider.** The provider accepts a GitHub token only when the owner ID, the repository ID and a tag ref all match. That tag rule is enforced here.
+**4. Create an identity pool and a GitHub provider.** The provider accepts a GitHub token only from a tag run of your repository, by owner ID and repository ID, in a job that uses the `chrome-web-store` environment. Any other workflow or branch in the repository is refused.
 
 ```bash
 OWNER_ID=12345678
@@ -180,7 +183,7 @@ gcloud iam workload-identity-pools providers create-oidc github \
   --location=global --workload-identity-pool=cws-publish \
   --issuer-uri="https://token.actions.githubusercontent.com" \
   --attribute-mapping="google.subject=assertion.sub,attribute.repository_id=assertion.repository_id,attribute.repository_owner_id=assertion.repository_owner_id,attribute.ref_type=assertion.ref_type" \
-  --attribute-condition="assertion.repository_owner_id == '$OWNER_ID' && assertion.repository_id == '$REPO_ID' && assertion.ref_type == 'tag'"
+  --attribute-condition="assertion.repository_owner_id == '$OWNER_ID' && assertion.repository_id == '$REPO_ID' && assertion.ref_type == 'tag' && assertion.environment == 'chrome-web-store'"
 ```
 
 **5. Let that repository act as the service account.** This grants `roles/iam.workloadIdentityUser` on the `cws-publisher` account only, not on the project, to tokens the pool accepted for your repository ID. The last two lines print the values for step 7.
@@ -203,23 +206,13 @@ gh variable set CWS_WIF_PROVIDER --repo OWNER/REPO --body "projects/..."
 gh variable set CWS_SERVICE_ACCOUNT --repo OWNER/REPO --body "cws-publisher@..."
 ```
 
-### Requiring an approval before each upload
+**8. Create the environment.** In the repository settings, add an environment named `chrome-web-store` with yourself as a required reviewer and a deployment rule that only allows your release tags, such as `v*`.
 
-Anyone who can create a tag in the repository can publish. To add a person in the loop:
+A tag ruleset that limits who can create release tags narrows it further.
 
-1. Create an environment named `chrome-web-store` in the repository settings, with yourself as a required reviewer and a deployment rule that allows `v*` tags. Required reviewers work on public repositories on every GitHub plan. On private repositories they depend on your plan.
-2. Add `environment: chrome-web-store` to the publishing job.
-3. Append `&& assertion.environment == 'chrome-web-store'` to the provider condition of step 4, so no other job can mint the token:
+### Repositories without environments
 
-```bash
-OWNER_ID=12345678
-REPO_ID=987654321
-gcloud iam workload-identity-pools providers update-oidc github \
-  --location=global --workload-identity-pool=cws-publish \
-  --attribute-condition="assertion.repository_owner_id == '$OWNER_ID' && assertion.repository_id == '$REPO_ID' && assertion.ref_type == 'tag' && assertion.environment == 'chrome-web-store'"
-```
-
-A tag ruleset that limits who can create `v*` tags narrows it further.
+Environments on private repositories depend on your GitHub plan. Without one, drop `&& assertion.environment == 'chrome-web-store'` from the condition in step 4 and `environment: chrome-web-store` from the job. Then anyone who can push a tag to the repository can publish, so limit who can create tags with a ruleset.
 
 ### Publishing from a branch
 
@@ -234,7 +227,7 @@ If you release from a branch instead of tags, replace `assertion.ref_type == 'ta
 | Refresh token flow only | `POST https://oauth2.googleapis.com/token` with the client ID, client secret and refresh token |
 | Always | `GET https://chromewebstore.googleapis.com/v2/publishers/{publisher-id}/items/{item-id}:fetchStatus` |
 | Unless skipped, refused or a dry run | `POST https://chromewebstore.googleapis.com/upload/v2/publishers/{publisher-id}/items/{item-id}:upload` with the ZIP |
-| While the upload is processing | `GET ...:fetchStatus` again, every 10 seconds, up to 30 times |
+| While an earlier upload or this one is processing | `GET ...:fetchStatus` again, every 10 seconds, up to 30 times |
 | After a successful upload, unless `publish` is `false` | `POST https://chromewebstore.googleapis.com/v2/publishers/{publisher-id}/items/{item-id}:publish` with `{"publishType": ...}` |
 | After submitting | `GET ...:fetchStatus` once, to confirm which version is in review |
 
@@ -252,7 +245,7 @@ The hosts are fixed in the code. There is no input to change them, redirects are
 | File | Lines | Role |
 | --- | --- | --- |
 | [`src/main.mjs`](src/main.mjs) | ~110 | Reads and validates inputs, masks secrets, sets outputs |
-| [`src/store.mjs`](src/store.mjs) | ~200 | The store calls and the state decisions |
+| [`src/store.mjs`](src/store.mjs) | ~230 | The store calls and the state decisions |
 | [`src/zip.mjs`](src/zip.mjs) | ~120 | Reads `manifest.json` from the ZIP, with checksum verification |
 | [`src/token.mjs`](src/token.mjs) | ~40 | Refresh token exchange |
 | [`src/runner.mjs`](src/runner.mjs) | ~50 | GitHub Actions inputs, outputs, masking and annotations |
@@ -266,7 +259,7 @@ The hosts are fixed in the code. There is no input to change them, redirects are
 
 ### Your side
 
-The linked service account can manage every item of the publisher. Bind only repositories you control, and consider the approval step above.
+The linked service account can manage every item of the publisher. Bind only repositories you control, and keep the environment in the provider condition.
 
 Report a vulnerability as described in [SECURITY.md](SECURITY.md).
 
@@ -275,7 +268,7 @@ Report a vulnerability as described in [SECURITY.md](SECURITY.md).
 - The API cannot create an item or change its visibility. After you change visibility in the dashboard, publish once by hand with the new visibility: until then the API cannot publish ([Google's note](https://developer.chrome.com/docs/webstore/using-api)).
 - One service account per publisher, shared by all its extensions.
 - Items opted in to Verified CRX Uploads are not supported: the store requires a signed CRX for them, and this action uploads ZIP packages only.
-- The upload request has 10 minutes to finish. ZIP64 archives are not supported.
+- Packages up to 2 GB, the store's limit. The upload request has 10 minutes to finish. ZIP64 archives are not supported.
 - Partial rollout (`deployPercentage`), skipping review and `blockOnWarnings` are not exposed.
 
 ## Development

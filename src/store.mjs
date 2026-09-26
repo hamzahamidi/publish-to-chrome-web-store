@@ -128,32 +128,57 @@ export async function publishToStore({
     );
   }
 
+  async function waitWhileProcessing(first, label) {
+    const started = Date.now();
+    let state = first.state;
+    let last = first.body;
+    let failures = 0;
+    for (let attempt = 1; UPLOADING_STATES.has(state) && attempt <= pollAttempts; attempt++) {
+      log(`${label} is processing, checking again in ${pollIntervalMs / 1000} s.`);
+      await sleep(pollIntervalMs);
+      try {
+        last = await fetchStatus();
+        failures = 0;
+        state = last.lastAsyncUploadState;
+      } catch (error) {
+        failures += 1;
+        if (!error.retryable || failures > statusRetries) throw error;
+        log(`Status check failed, trying again: ${error.message}`);
+      }
+    }
+    return { state, last, seconds: Math.round((Date.now() - started) / 1000) };
+  }
+
+  if (UPLOADING_STATES.has(status.lastAsyncUploadState)) {
+    if (dryRun) {
+      log('An earlier upload is still processing in the store. A real run would wait for it before uploading.');
+    } else {
+      const earlier = await waitWhileProcessing({ state: status.lastAsyncUploadState, body: status }, 'An earlier upload');
+      if (UPLOADING_STATES.has(earlier.state)) {
+        throw new ActionError(
+          `An earlier upload was still processing after ${earlier.seconds} s, so this run uploaded nothing.`,
+          'Check the Developer Dashboard, then re-run this job once that upload has finished.',
+        );
+      }
+    }
+  }
+
   if (dryRun) {
     log(`Dry run: version ${version} would be uploaded${submit ? ' and submitted for review' : ' as a draft'}. Nothing was sent to the store.`);
     return { result: 'dry-run', state: '' };
   }
 
   const upload = await call('POST', `/upload/v2/${item}:upload`, { body: zip, timeoutMs: uploadTimeoutMs });
-  const processingStarted = Date.now();
-  let state = upload.uploadState;
-  let last = upload;
-  let failures = 0;
-  for (let attempt = 1; UPLOADING_STATES.has(state) && attempt <= pollAttempts; attempt++) {
-    log(`Upload is processing, checking again in ${pollIntervalMs / 1000} s.`);
-    await sleep(pollIntervalMs);
-    try {
-      last = await fetchStatus();
-      failures = 0;
-      state = last.lastAsyncUploadState;
-    } catch (error) {
-      failures += 1;
-      if (!error.retryable || failures > statusRetries) throw error;
-      log(`Status check failed, trying again: ${error.message}`);
-    }
+  if (upload.uploadState === 'SUCCEEDED' && typeof upload.crxVersion === 'string' && upload.crxVersion !== version) {
+    throw new ActionError(
+      `The store accepted a package with version ${upload.crxVersion}, not ${version}. This run did not submit it.`,
+      'Another writer may have uploaded to this item at the same time. Check the draft in the Developer Dashboard.',
+    );
   }
+  const { state, last, seconds } = await waitWhileProcessing({ state: upload.uploadState, body: upload }, 'Upload');
   if (UPLOADING_STATES.has(state)) {
     throw new ActionError(
-      `The store was still processing version ${version} after ${Math.round((Date.now() - processingStarted) / 1000)} s. This run did not submit it.`,
+      `The store was still processing version ${version} after ${seconds} s. This run did not submit it.`,
       'The store may still finish processing it as a draft, or the upload may fail. Check the Developer Dashboard, then submit the draft there or re-run this job.',
     );
   }
