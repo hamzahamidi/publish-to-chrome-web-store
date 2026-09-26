@@ -1,0 +1,21 @@
+codecov:
+  branch: main
+
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 0.5%
+        if_not_found: success
+    patch:
+      default:
+        target: 80%
+        if_not_found: success
+
+comment:
+  layout: "condensed_header, diff, files"
+  require_changes: true
+
+ignore:
+  - "test/**"

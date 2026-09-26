@@ -1,5 +1,12 @@
 # Publish to Chrome Web Store
 
+[![CI](https://github.com/hamzahamidi/publish-to-chrome-web-store/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/hamzahamidi/publish-to-chrome-web-store/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/hamzahamidi/publish-to-chrome-web-store/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/hamzahamidi/publish-to-chrome-web-store/actions/workflows/codeql.yml)
+[![codecov](https://codecov.io/gh/hamzahamidi/publish-to-chrome-web-store/branch/main/graph/badge.svg)](https://codecov.io/gh/hamzahamidi/publish-to-chrome-web-store)
+[![GitHub Marketplace](https://img.shields.io/github/v/release/hamzahamidi/publish-to-chrome-web-store?label=Marketplace&logo=github)](https://github.com/marketplace/actions/publish-to-chrome-web-store)
+[![runtime deps](https://img.shields.io/badge/runtime%20deps-0-2ea44f)](package.json)
+[![license](https://img.shields.io/github/license/hamzahamidi/publish-to-chrome-web-store)](LICENSE)
+
 Publish a Chrome extension from GitHub Actions through the Chrome Web Store API v2 with a short-lived token, so no publishing secret needs to be stored.
 
 - **No stored publishing secret.** In the recommended setup, GitHub's OIDC token becomes a 30-minute Google access token through Workload Identity Federation, and nothing that can publish your extension sits in repository secrets.
@@ -444,7 +451,8 @@ The hosts are fixed in the code. There is no input to change them, redirects are
 
 ### How it is checked
 
-- Every pull request type-checks the code and runs the tests on Linux, Windows and macOS with a coverage floor of 95% of lines. The tests start the action's entry point against a mock store on all three, and two separate jobs run the action from `action.yml`: one uploads a ZIP, the other signs a CRX with `sign/action.yml` and uploads it. See [ci.yml](.github/workflows/ci.yml).
+- Every pull request type-checks the code and runs the tests on Linux, Windows and macOS with a coverage floor of 95% of lines. The tests start the action's entry point against a mock store on all three, and two separate jobs run the action from `action.yml`: one uploads a ZIP, the other signs a CRX with `sign/action.yml` and uploads it. See [ci.yml](.github/workflows/ci.yml). The Linux run reports coverage to [Codecov](https://codecov.io/gh/hamzahamidi/publish-to-chrome-web-store) with a short-lived token, like the store route.
+- [OpenSSF Scorecard](.github/workflows/scorecard.yml) checks the repository's security practices on every push to `main` and weekly, and publishes the result.
 - [CodeQL](.github/workflows/codeql.yml) scans the JavaScript and the workflows on every pull request, every push to `main` and weekly. Dependabot keeps the workflow actions current.
 - Releases are immutable: once `v1.0.0` is published, its tag and contents cannot change. `v1` points at the newest `1.x` release. [The workflow that moves it](.github/workflows/major-tag.yml) always points `v1` at the highest `1.x.y` release, refuses one that is not immutable, and runs one release at a time. If your organization requires full commit SHAs, pin the commit of a release.
 
