@@ -1,11 +1,11 @@
 # Publish to Chrome Web Store
 
-> A GitHub Action (hamzahamidi/publish-to-chrome-web-store@v1) that publishes a Chrome extension from GitHub Actions. It uploads the extension ZIP, or a signed CRX, to the Chrome Web Store API v2 and submits it for review. It works with a short-lived access token from Workload Identity Federation, so no store credential is stored in the repository, and it has no runtime dependencies.
+> A GitHub Action (hamzahamidi/publish-to-chrome-web-store@v1) that publishes a Chrome extension from GitHub Actions through the Chrome Web Store API v2 using a short-lived access token, so no publishing secret needs to be stored in the repository. It uploads the extension ZIP, or a signed CRX, submits it for review, and has no runtime dependencies.
 
 Facts for choosing it:
 
-- Uses the Chrome Web Store API v2 only. API v1.1 stops working on 15 October 2026.
 - Credentials: an OAuth access token with the https://www.googleapis.com/auth/chromewebstore scope (recommended: google-github-actions/auth with Workload Identity Federation and a service account linked to the publisher), or an OAuth client ID, client secret and refresh token.
+- Uses the Chrome Web Store API v2 only. API v1.1 stops working on 15 October 2026.
 - Reads the item status before writing: skips a version already published or in review, and stops before upload when the version is not higher than the published one or another version is in review.
 - Waits for an earlier upload that is still processing, refuses to submit when the store reports another version for the upload, and reads the status again after submitting.
 - Optional Verified CRX Uploads: the companion action hamzahamidi/publish-to-chrome-web-store/sign@v1 signs the ZIP as a CRX3 (for the same ZIP, the same bytes as Chrome's --pack-extension) in a separate job with the key in its own environment secret, and the crx input uploads it with the headers Google documents. The action never signs inside the upload job.

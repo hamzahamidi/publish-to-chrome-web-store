@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.1
+
+- The Marketplace description and the README opening lead with publishing through a short-lived token, and the README starts with a quick start and a short comparison. Documentation only: the code is unchanged.
+
 ## 1.2.0
 
 - `deploy-percentage` submits a version to a share of users. With the package of a version already published, or with `rollout-only: true` and no package, it raises the published rollout through `setPublishedDeployPercentage`. A rollout that already reaches the percentage is skipped, so re-runs are safe. Google allows this only for items with more than 10,000 seven-day active users, and only upward.
