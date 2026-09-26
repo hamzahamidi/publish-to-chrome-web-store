@@ -10,7 +10,7 @@
     "test": "node --test --experimental-test-coverage --test-coverage-lines=95 --test-coverage-branches=85 --test-coverage-functions=85 \"test/*.test.ts\""
   },
   "devDependencies": {
-    "@types/node": "24.19.0",
+    "@types/node": "26.6.2",
     "typescript": "7.0.2"
   }
 }
