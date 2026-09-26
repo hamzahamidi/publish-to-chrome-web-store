@@ -15,6 +15,9 @@ export interface PublishOptions {
   submit?: boolean;
   dryRun?: boolean;
   publishType?: PublishType;
+  deployPercentage?: number;
+  skipReview?: boolean;
+  blockOnWarnings?: boolean;
   apiBase?: string;
   pollIntervalMs?: number;
   pollAttempts?: number;
@@ -26,9 +29,29 @@ export interface PublishOptions {
 }
 
 export interface PublishResult {
-  result: 'submitted' | 'uploaded' | 'skipped' | 'dry-run';
+  result: 'submitted' | 'uploaded' | 'skipped' | 'dry-run' | 'raised';
   state: string;
 }
+
+export interface RolloutOptions {
+  token: string;
+  publisherId: string;
+  itemId: string;
+  deployPercentage: number;
+  dryRun?: boolean;
+  apiBase?: string;
+  requestTimeoutMs?: number;
+  log?: (line: string) => void;
+}
+
+interface ClientOptions {
+  token: string;
+  apiBase: string;
+  requestTimeoutMs: number;
+  crxFileName?: string;
+}
+
+type Call = <T>(method: string, path: string, options?: CallOptions) => Promise<T>;
 
 interface DistributionChannel {
   crxVersion?: unknown;
@@ -59,7 +82,7 @@ interface PublishResponse {
 }
 
 interface GoogleError {
-  error?: { message?: string; details?: Array<{ reason?: unknown }> };
+  error?: { message?: string; details?: Array<{ '@type'?: unknown; reason?: unknown }> };
 }
 
 interface CallOptions extends RequestInit {
@@ -85,30 +108,11 @@ const REVIEW_STATES = new Set(['PENDING_REVIEW', 'STAGED']);
 const MUST_USE_CRX = /PKG_MUST_UPDATE_AS_CRX|update your item with a crx/i;
 const USE_CRX_HINT = 'This item is opted in to Verified CRX Uploads, so the store only accepts a CRX signed with your key. Pass it through the crx input.';
 const CRX_REFUSED_HINT = 'If the store refused the CRX itself, check that the item is opted in to Verified CRX Uploads and that the CRX is signed with the key registered on its Package tab.';
+const SKIP_REVIEW_HINT = 'With skip-review the store refuses a submission that needs review, and the uploaded package stays as a draft. If that is why the store refused, remove skip-review for this release.';
+const ROLLOUT_HINT = 'Google lets the API set a rollout percentage only for items with more than 10,000 seven-day active users, and only upward.';
 
-export async function publishToStore({
-  token,
-  publisherId,
-  itemId,
-  version,
-  zip,
-  crxFileName,
-  submit = true,
-  dryRun = false,
-  publishType = 'DEFAULT_PUBLISH',
-  apiBase = STORE_API,
-  pollIntervalMs = 10_000,
-  pollAttempts = 30,
-  statusRetries = 2,
-  requestTimeoutMs = 120_000,
-  uploadTimeoutMs = 600_000,
-  log = () => {},
-  warn = () => {},
-}: PublishOptions): Promise<PublishResult> {
-  const item = `publishers/${publisherId}/items/${itemId}`;
-  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-  async function call<T>(method: string, path: string, { timeoutMs = requestTimeoutMs, hint, ...init }: CallOptions = {}): Promise<T> {
+function storeClient({ token, apiBase, requestTimeoutMs, crxFileName }: ClientOptions): Call {
+  return async function call<T>(method: string, path: string, { timeoutMs = requestTimeoutMs, hint, ...init }: CallOptions = {}): Promise<T> {
     let response: Response;
     let text: string;
     try {
@@ -145,16 +149,100 @@ export async function publishToStore({
       const reason = googleError?.message ?? text.slice(0, 2000);
       const details = Array.isArray(googleError?.details) ? googleError.details : [];
       const detailReason = details.map((detail) => detail?.reason).find((each): each is string => typeof each === 'string');
+      const extra = details.filter((detail) => !String(detail?.['@type'] ?? '').endsWith('google.rpc.ErrorInfo'));
       const retryable = RETRYABLE_STATUSES.has(response.status);
       const fallback = retryable ? (method === 'POST' ? RERUN_HINT : undefined) : hint;
       const crxHint = !crxFileName && MUST_USE_CRX.test(text) ? USE_CRX_HINT : undefined;
-      throw new ActionError(`${method} ${path} returned HTTP ${response.status}: ${reason}`, crxHint || (detailReason && REASON_HINTS[detailReason]) || STATUS_HINTS[response.status] || fallback, { retryable });
+      const message = `${method} ${path} returned HTTP ${response.status}: ${reason}${extra.length > 0 ? ` Details: ${JSON.stringify(extra).slice(0, 1500)}` : ''}`;
+      throw new ActionError(message, crxHint || (detailReason && REASON_HINTS[detailReason]) || STATUS_HINTS[response.status] || fallback, { retryable });
     }
     if (body === undefined || body === null || typeof body !== 'object') {
       throw new ActionError(`${method} ${path} returned a response that is not JSON: ${text.slice(0, 2000)}`);
     }
     return body as T;
+  };
+}
+
+type Rollout = { version: string; percentage: number | undefined; state: string };
+
+function rolloutOf(revision: RevisionStatus | undefined, version?: string): Rollout | undefined {
+  const channels = (revision?.distributionChannels ?? []).filter((channel): channel is DistributionChannel & { crxVersion: string } => isExtensionVersion(channel?.crxVersion));
+  const channel = version ? channels.find((each) => each.crxVersion === version) : channels.sort((a, b) => compareVersions(a.crxVersion, b.crxVersion)).at(-1);
+  if (!channel) return undefined;
+  return { version: channel.crxVersion, percentage: typeof channel.deployPercentage === 'number' ? channel.deployPercentage : undefined, state: revision?.state ?? 'PUBLISHED' };
+}
+
+async function raisePublished(
+  call: Call,
+  item: string,
+  rollout: Rollout,
+  deployPercentage: number,
+  dryRun: boolean,
+  log: (line: string) => void,
+): Promise<PublishResult> {
+  const current = rollout.percentage === undefined ? 'an unreported share' : `${rollout.percentage}%`;
+  if (rollout.percentage !== undefined && rollout.percentage >= deployPercentage) {
+    log(`Version ${rollout.version} already reaches ${current} of users. Nothing to raise.`);
+    return { result: 'skipped', state: rollout.state };
   }
+  if (dryRun) {
+    log(`Dry run: version ${rollout.version} would go from ${current} to ${deployPercentage}% of users. Nothing was sent to the store.`);
+    return { result: 'dry-run', state: rollout.state };
+  }
+  await call('POST', `/v2/${item}:setPublishedDeployPercentage`, {
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ deployPercentage }),
+    hint: ROLLOUT_HINT,
+  });
+  log(`Raised version ${rollout.version} from ${current} to ${deployPercentage}% of users.`);
+  return { result: 'raised', state: rollout.state };
+}
+
+export async function raiseRollout({
+  token,
+  publisherId,
+  itemId,
+  deployPercentage,
+  dryRun = false,
+  apiBase = STORE_API,
+  requestTimeoutMs = 120_000,
+  log = () => {},
+}: RolloutOptions): Promise<PublishResult & { version: string }> {
+  const item = `publishers/${publisherId}/items/${itemId}`;
+  const call = storeClient({ token, apiBase, requestTimeoutMs });
+  const status = await call<ItemStatus>('GET', `/v2/${item}:fetchStatus`);
+  const rollout = rolloutOf(status.publishedItemRevisionStatus);
+  if (!rollout) throw new ActionError('No version of this item is published, so there is no rollout to raise.');
+  log(`Store: version ${rollout.version} is published${rollout.percentage === undefined ? '' : ` to ${rollout.percentage}% of users`}.`);
+  return { ...(await raisePublished(call, item, rollout, deployPercentage, dryRun, log)), version: rollout.version };
+}
+
+export async function publishToStore({
+  token,
+  publisherId,
+  itemId,
+  version,
+  zip,
+  crxFileName,
+  submit = true,
+  dryRun = false,
+  publishType = 'DEFAULT_PUBLISH',
+  deployPercentage,
+  skipReview = false,
+  blockOnWarnings = false,
+  apiBase = STORE_API,
+  pollIntervalMs = 10_000,
+  pollAttempts = 30,
+  statusRetries = 2,
+  requestTimeoutMs = 120_000,
+  uploadTimeoutMs = 600_000,
+  log = () => {},
+  warn = () => {},
+}: PublishOptions): Promise<PublishResult> {
+  const item = `publishers/${publisherId}/items/${itemId}`;
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  const call = storeClient({ token, apiBase, requestTimeoutMs, crxFileName });
 
   const fetchStatus = () => call<ItemStatus>('GET', `/v2/${item}:fetchStatus`);
 
@@ -168,6 +256,8 @@ export async function publishToStore({
   if (status.warned === true) warn('The Chrome Web Store reports a policy warning on this item. It will be taken down if the violation is not resolved.');
 
   if (publishedVersions.includes(version)) {
+    const rollout = rolloutOf(published, version);
+    if (deployPercentage !== undefined && rollout) return raisePublished(call, item, rollout, deployPercentage, dryRun, log);
     log(`Version ${version} is already published. Nothing to upload.`);
     return { result: 'skipped', state: published?.state ?? 'PUBLISHED' };
   }
@@ -269,10 +359,15 @@ export async function publishToStore({
 
   const publish = await call<PublishResponse>('POST', `/v2/${item}:publish`, {
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ publishType }),
-    hint: PUBLISH_HINT,
+    body: JSON.stringify({
+      publishType,
+      ...(deployPercentage === undefined ? {} : { deployInfos: [{ deployPercentage }] }),
+      ...(skipReview ? { skipReview: true } : {}),
+      ...(blockOnWarnings ? { blockOnWarnings: true } : {}),
+    }),
+    hint: [PUBLISH_HINT, deployPercentage !== undefined && ROLLOUT_HINT, skipReview && SKIP_REVIEW_HINT].filter(Boolean).join(' '),
   });
-  log(`Submitted version ${version} for review. Store state: ${publish.state ?? 'unknown'}.`);
+  log(`Submitted version ${version}${skipReview ? ' asking to skip review' : ' for review'}${deployPercentage === undefined ? '' : ` to ${deployPercentage}% of users`}. Store state: ${publish.state ?? 'unknown'}.`);
   const warnings = publish.warningInfo?.warnings;
   if (Array.isArray(warnings)) {
     for (const warning of warnings.slice(0, 20)) {

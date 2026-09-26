@@ -79,6 +79,18 @@ export const ITEM_PATH = `/publishers/${PUBLISHER}/items/${ITEM}`;
 export const FETCH = `GET /v2${ITEM_PATH}:fetchStatus`;
 export const UPLOAD = `POST /upload/v2${ITEM_PATH}:upload`;
 export const PUBLISH = `POST /v2${ITEM_PATH}:publish`;
+export const ROLLOUT = `POST /v2${ITEM_PATH}:setPublishedDeployPercentage`;
+
+export function publishedAt(version: string, deployPercentage?: number): Reply {
+  return {
+    body: {
+      publishedItemRevisionStatus: {
+        state: 'PUBLISHED',
+        distributionChannels: [{ crxVersion: version, ...(deployPercentage === undefined ? {} : { deployPercentage }) }],
+      },
+    },
+  };
+}
 
 export interface Reply {
   status?: number;

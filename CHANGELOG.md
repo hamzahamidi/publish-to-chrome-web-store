@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.0
+
+- `deploy-percentage` submits a version to a share of users. With the package of a version already published, or with `rollout-only: true` and no package, it raises the published rollout through `setPublishedDeployPercentage`. A rollout that already reaches the percentage is skipped, so re-runs are safe. Google allows this only for items with more than 10,000 seven-day active users, and only upward.
+- `skip-review` asks the store to publish without review, which it refuses when the change needs review, and `block-on-warnings` makes it refuse a submission that has warnings.
+- The three inputs need `publish: true`, and `rollout-only` refuses a package, `skip-review`, `block-on-warnings` and `publish-type: staged`, so a misconfigured run stops before any request.
+- A new `result`, `raised`, reports a rollout that went up.
+- Store errors include the details Google returns beyond the error reason, such as the warnings that blocked a submission.
+
 ## 1.1.0
 
 - Optional support for Verified CRX Uploads. The new `crx` input uploads a CRX3 with the `X-Goog-Upload-Protocol: raw` and `X-Goog-Upload-File-Name` headers Google documents, and reads the version from the ZIP inside it. `zip` works as before.
