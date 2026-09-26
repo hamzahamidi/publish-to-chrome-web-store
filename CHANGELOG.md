@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.1
+
+- The Marketplace description and the README opening lead with publishing through a short-lived token, and the README starts with a quick start and a short comparison.
+- The README Limits section separates what the action does not do from what the Chrome Web Store imposes on any publishing tool.
+- llms.txt describes the CRX input and the rollout raise through a published package.
+- Documentation only: the code is unchanged from 1.2.0.
+
 ## 1.2.0
 
 - `deploy-percentage` submits a version to a share of users. With the package of a version already published, or with `rollout-only: true` and no package, it raises the published rollout through `setPublishedDeployPercentage`. A rollout that already reaches the percentage is skipped, so re-runs are safe. Google allows this only for items with more than 10,000 seven-day active users, and only upward.

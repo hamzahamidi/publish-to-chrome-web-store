@@ -1,5 +1,5 @@
 name: Publish to Chrome Web Store
-description: Upload a Chrome extension ZIP or signed CRX and submit it for review with the Chrome Web Store API v2. No dependencies.
+description: Publish Chrome extensions with the Chrome Web Store API v2. Accepts a short-lived token, so no publishing secret is needed.
 author: Hamza Hamidi
 
 branding:

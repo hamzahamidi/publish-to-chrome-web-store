@@ -1,17 +1,56 @@
 # Publish to Chrome Web Store
 
-A GitHub Action that publishes a Chrome extension from GitHub Actions: it uploads the ZIP, or a signed CRX, to the Chrome Web Store and submits it for review, through the Chrome Web Store API v2.
+Publish a Chrome extension from GitHub Actions through the Chrome Web Store API v2 with a short-lived token, so no publishing secret needs to be stored.
 
-- **No stored secret needed.** It takes a short-lived access token, which `google-github-actions/auth` can mint through Workload Identity Federation. The store credential never sits in your repository secrets. Verified CRX Uploads, if you opt in, add one secret: the signing key.
-- **Safe to re-run.** It reads the store status before writing anything. A version that is already published or in review is skipped. A version that the store would refuse, or a review in progress for another version, stops the run with a clear message before anything is uploaded.
-- **Approval before each upload.** The recommended setup only lets an approved job in one GitHub environment obtain the token.
-- **Readable, typed, no runtime dependencies.** About 900 lines of TypeScript in `src/` and `sign/`, importing only Node.js built-ins. Node runs those files as they are: no bundle, no `dist/`, no build step, so what you read is what runs.
-- **Verified CRX Uploads, if you opt in.** A companion `sign` action signs the ZIP as a CRX3 in a separate job, writing for the same ZIP the same bytes as Chrome's packer, and this action uploads it. The signing key and the store token never meet in one job.
-- **Partial rollouts.** `deploy-percentage` releases a version to a share of users and raises that share later, for items large enough that Google allows it.
-- **Testable without risk.** `dry-run: true` checks your ZIP, that your credentials can read the item, and the store state, then stops before uploading.
-- **Existing setups work too.** It also accepts an OAuth client ID, client secret and refresh token.
+- **No stored publishing secret.** In the recommended setup, GitHub's OIDC token becomes a 30-minute Google access token through Workload Identity Federation, and nothing that can publish your extension sits in repository secrets.
+- **Safe to re-run.** The action reads the store status first. A version already published or in review is skipped, and one the store would refuse stops the run before anything is uploaded.
+- **API v2 only.** Google supports the old v1.1 API only until 15 October 2026.
+- **Auditable.** About 900 lines of TypeScript with no runtime dependencies and no build step, sending credentials only to two Google hosts.
+- **More when you need it.** Signed CRX uploads, partial rollouts, dry runs, and the OAuth refresh token setup other actions use.
 
-The Chrome Web Store API v1.1 stops working on 15 October 2026. This action only calls v2.
+## Quick start
+
+After the [one-time setup](#setting-up-workload-identity-federation) in Google Cloud and the repository settings, add this job to a workflow that runs when you push a release tag:
+
+```yaml
+publish:
+  needs: build
+  runs-on: ubuntu-latest
+  environment: chrome-web-store
+  permissions:
+    id-token: write
+  concurrency:
+    group: chrome-web-store
+    cancel-in-progress: false
+  steps:
+    - uses: actions/download-artifact@v8
+      with:
+        name: extension
+    - id: auth
+      uses: google-github-actions/auth@v3
+      with:
+        workload_identity_provider: ${{ vars.CWS_WIF_PROVIDER }}
+        service_account: ${{ vars.CWS_SERVICE_ACCOUNT }}
+        token_format: access_token
+        access_token_scopes: https://www.googleapis.com/auth/chromewebstore
+        access_token_lifetime: 1800s
+        create_credentials_file: false
+        export_environment_variables: false
+    - uses: hamzahamidi/publish-to-chrome-web-store@v1
+      with:
+        access-token: ${{ steps.auth.outputs.access_token }}
+        publisher-id: your-publisher-id
+        item-id: abcdefghijklmnopabcdefghijklmnop
+        zip: extension.zip
+```
+
+The ZIP comes from a `build` job without `id-token: write`, shown in full under [Usage](#with-workload-identity-federation-recommended). Add `dry-run: true` to the last step for a first run that uploads nothing.
+
+## Why this action
+
+- **The credential is short-lived.** Three of the four actions [compared below](#how-it-compares) require an OAuth refresh token, a long-lived secret that can publish every extension of the publisher. Here the Workload Identity provider issues a 30-minute token only to a tag run of your repository, in an environment that can require approval, and no reusable publishing credential is stored in GitHub.
+- **The store API leaves the checks to you.** `publish` takes no version and submits whatever was uploaded last, and the store refuses uploads during a review. The action checks the state before uploading and again after submitting. See [What it does](#what-it-does).
+- **Signing stays away from the token.** For items opted in to Verified CRX Uploads, a companion `sign` action signs the package in a separate job, so the signing key and the store token never meet.
 
 Not affiliated with or endorsed by Google. Chrome Web Store is a trademark of Google LLC.
 
