@@ -133,6 +133,7 @@ describe('sign action', () => {
     writeFileSync(zipPath, extensionZip('1.0'));
     assert.match((await runSign({ zip: zipPath })).stdout, /Input private-key is required\./);
     assert.match((await runSign({ zip: join(dir, 'none.zip'), 'private-key': privateKey })).stdout, /no such file/);
+    assert.match((await runSign({ zip: dir, 'private-key': privateKey })).stdout, /is not a regular file\./);
     assert.match((await runSign({ zip: zipPath, crx: zipPath, 'private-key': privateKey })).stdout, /Input crx must name a different file than zip\./);
     assert.match((await runSign({ zip: zipPath, crx: join(dir, '.', 'ext.zip'), 'private-key': privateKey })).stdout, /Input crx must name a different file than zip\./);
     assert.equal(readFileSync(zipPath).length, extensionZip('1.0').length);

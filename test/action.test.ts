@@ -246,6 +246,7 @@ describe('action', () => {
     ['an unknown publish-type', { 'publish-type': 'now' }, /publish-type must be default or staged, got "now"/],
     ['a publish value that is not boolean', { publish: 'yes' }, /Input publish must be true or false, got "yes"/],
     ['a missing ZIP', { zip: 'nope/ext.zip' }, /Cannot read "nope\/ext\.zip": no such file\./],
+    ['a folder as the ZIP', { zip: '.' }, /"\." is not a regular file\./],
     ['no package', { zip: '' }, /Input zip is required, or crx for an item opted in to Verified CRX Uploads\. To raise the rollout .* set rollout-only and deploy-percentage\./],
     ['an empty zip with deploy-percentage', { zip: '', 'deploy-percentage': '10' }, /Input zip is required/],
     ['rollout-only without deploy-percentage', { zip: '', 'rollout-only': 'true' }, /Input rollout-only needs deploy-percentage/],
