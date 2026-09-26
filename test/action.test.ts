@@ -120,10 +120,10 @@ describe('action', () => {
     assert.equal(store.requests.length, 0);
   });
 
-  it('raises the rollout of the published version when given deploy-percentage alone', async () => {
+  it('raises the rollout of the published version with rollout-only', async () => {
     store.on(FETCH, publishedAt('2.0.0', 10));
     store.on(ROLLOUT, { body: {} });
-    const inputs = baseInputs('1.0.0', { 'deploy-percentage': '50' });
+    const inputs = baseInputs('1.0.0', { 'deploy-percentage': '50', 'rollout-only': 'true' });
     delete inputs.zip;
     const run = await runAction(inputs);
     assert.equal(run.code, 0, run.stdout);
@@ -246,7 +246,15 @@ describe('action', () => {
     ['an unknown publish-type', { 'publish-type': 'now' }, /publish-type must be default or staged, got "now"/],
     ['a publish value that is not boolean', { publish: 'yes' }, /Input publish must be true or false, got "yes"/],
     ['a missing ZIP', { zip: 'nope/ext.zip' }, /Cannot read "nope\/ext\.zip": no such file\./],
-    ['no package', { zip: '' }, /Input zip is required, or crx for an item opted in to Verified CRX Uploads, or deploy-percentage alone/],
+    ['no package', { zip: '' }, /Input zip is required, or crx for an item opted in to Verified CRX Uploads\. To raise the rollout .* set rollout-only and deploy-percentage\./],
+    ['an empty zip with deploy-percentage', { zip: '', 'deploy-percentage': '10' }, /Input zip is required/],
+    ['rollout-only without deploy-percentage', { zip: '', 'rollout-only': 'true' }, /Input rollout-only needs deploy-percentage/],
+    ['rollout-only with a package', { 'rollout-only': 'true', 'deploy-percentage': '10', 'skip-review': 'true' }, /rollout-only only raises the rollout of the published version, so it cannot be combined with zip, skip-review\./],
+    ['rollout-only with a staged publish-type', { zip: '', 'rollout-only': 'true', 'deploy-percentage': '10', 'publish-type': 'staged' }, /cannot be combined with publish-type staged\./],
+    ['publish false with deploy-percentage', { publish: 'false', 'deploy-percentage': '10' }, /deploy-percentage, skip-review and block-on-warnings need publish: true/],
+    ['publish false with rollout-only', { zip: '', publish: 'false', 'rollout-only': 'true', 'deploy-percentage': '10' }, /need publish: true/],
+    ['publish false with skip-review', { publish: 'false', 'skip-review': 'true' }, /need publish: true/],
+    ['publish false with block-on-warnings', { publish: 'false', 'block-on-warnings': 'true' }, /need publish: true/],
     ['a deploy-percentage that is not a number', { 'deploy-percentage': 'half' }, /deploy-percentage must be a whole number from 0 to 100, got "half"/],
     ['a deploy-percentage above 100', { 'deploy-percentage': '101' }, /deploy-percentage must be a whole number from 0 to 100, got "101"/],
     ['a negative deploy-percentage', { 'deploy-percentage': '-5' }, /deploy-percentage must be a whole number from 0 to 100, got "-5"/],

@@ -9,7 +9,7 @@ Facts for choosing it:
 - Reads the item status before writing: skips a version already published or in review, and stops before upload when the version is not higher than the published one or another version is in review.
 - Waits for an earlier upload that is still processing, refuses to submit when the store reports another version for the upload, and reads the status again after submitting.
 - Optional Verified CRX Uploads: the companion action hamzahamidi/publish-to-chrome-web-store/sign@v1 signs the ZIP as a CRX3 (for the same ZIP, the same bytes as Chrome's --pack-extension) in a separate job with the key in its own environment secret, and the crx input uploads it with the headers Google documents. The action never signs inside the upload job.
-- Partial rollout: deploy-percentage submits to a share of users, and run without a package it raises the published rollout (Google allows this only for items with more than 10,000 seven-day active users, and only upward). skip-review and block-on-warnings pass the matching publish options.
+- Partial rollout: deploy-percentage submits to a share of users, and with rollout-only: true and no package it raises the published rollout (Google allows this only for items with more than 10,000 seven-day active users, and only upward). skip-review and block-on-warnings pass the matching publish options.
 - dry-run: true checks the ZIP, that the credentials can read the item, and the store state, without uploading.
 - Sends credentials only to chromewebstore.googleapis.com and oauth2.googleapis.com, refuses redirects, masks every credential in the log and returns none as an output.
 - Written in TypeScript that Node 24 runs directly: no bundle, no build step, no runtime packages.

@@ -158,9 +158,23 @@ To submit a version to 10% of users, add the input to the publish step:
     deploy-percentage: 10
 ```
 
-To raise the published version to 50% later, run the step again with `deploy-percentage: 50` and without `zip` or `crx`. The action reads which version is published and raises it. A run that gives a ZIP of a version already published raises that version instead of skipping it. When the store already reports the percentage or more, nothing is sent and `result` is `skipped`, so a re-run is safe. `dry-run: true` reports the change without sending it.
+To raise the published version to 50% later, run the step again with the ZIP of that version and `deploy-percentage: 50`. The action sees the version is published and raises it instead of skipping it. Without a package, set `rollout-only: true` and leave out `zip` and `crx`: the action reads which version is published and raises it.
 
-`skip-review: true` asks the store to skip review, which it grants only when the change qualifies, and otherwise sends the version to review as usual. `block-on-warnings: true` makes the store refuse the submission when it has warnings, and the action shows the warnings the store returns.
+```yaml
+- uses: hamzahamidi/publish-to-chrome-web-store@v1
+  with:
+    access-token: ${{ steps.auth.outputs.access_token }}
+    publisher-id: your-publisher-id
+    item-id: your-32-letter-extension-id
+    rollout-only: true
+    deploy-percentage: 50
+```
+
+`rollout-only` is a separate input so that an empty `zip`, such as a mistyped step output, fails the run instead of turning a release into a rollout change. When the store already reports the percentage or more, nothing is sent and `result` is `skipped`, so a re-run is safe. `dry-run: true` reports the change without sending it.
+
+`skip-review: true` asks the store to publish without review. The store refuses the submission when the change needs review, and the run fails with the package left as a draft, so drop the input for such a release. `block-on-warnings: true` makes the store refuse the submission when it has warnings, and the action shows the warnings the store returns.
+
+`deploy-percentage`, `skip-review` and `block-on-warnings` only apply when the store publishes, so the action refuses them with `publish: false`.
 
 ### With an OAuth refresh token
 
@@ -187,13 +201,14 @@ A service account key also works. Grant the service account `roles/iam.serviceAc
 | `client-id`, `client-secret`, `refresh-token` | one of the two credential forms | | OAuth client and refresh token, exchanged for an access token at the start of the run |
 | `publisher-id` | yes | | Publisher ID from the Account page of the Developer Dashboard |
 | `item-id` | yes | | The 32 letter extension ID |
-| `zip` | one of `zip` or `crx` | | Path to the extension ZIP, with `manifest.json` at its root |
-| `crx` | one of `zip` or `crx` | | Path to a CRX3 you signed, for an item opted in to Verified CRX Uploads. Uploaded as is |
+| `zip` | one of `zip` or `crx`, unless `rollout-only` | | Path to the extension ZIP, with `manifest.json` at its root |
+| `crx` | one of `zip` or `crx`, unless `rollout-only` | | Path to a CRX3 you signed, for an item opted in to Verified CRX Uploads. Uploaded as is |
 | `publish` | no | `true` | `false` uploads the package as a draft without submitting it |
 | `dry-run` | no | `false` | `true` stops after the status check and reports what would happen |
-| `deploy-percentage` | no | | Share of users, 0 to 100, who get the version. See [Partial rollout](#partial-rollout) |
-| `skip-review` | no | `false` | `true` asks the store to skip review. It does so only when the change qualifies |
-| `block-on-warnings` | no | `false` | `true` makes the store refuse the submission when it has warnings |
+| `deploy-percentage` | no | | Share of users, 0 to 100, who get the version. Needs `publish: true`. See [Partial rollout](#partial-rollout) |
+| `rollout-only` | no | `false` | `true`, with `deploy-percentage` and no `zip` or `crx`, raises the rollout of the newest published version without uploading |
+| `skip-review` | no | `false` | `true` asks the store to publish without review. The store refuses the submission when the change needs review |
+| `block-on-warnings` | no | `false` | `true` makes the store refuse the submission when it has warnings. Needs `publish: true` |
 | `publish-type` | no | `default` | `default` makes the version live once it passes review. `staged` holds the approved version until you publish it in the dashboard or with a separate publish call to the API. You have 30 days after approval, then it reverts to a draft and needs a new review. This action does not publish a staged version, even when re-run |
 
 ## Outputs
@@ -202,7 +217,7 @@ A service account key also works. Grant the service account `roles/iam.serviceAc
 | --- | --- |
 | `result` | `submitted`, `uploaded` (when `publish` is `false`), `skipped` (this version was already in the store, or its rollout already reached `deploy-percentage`), `raised` (the rollout of the published version went up) or `dry-run` (a dry run that would upload or raise) |
 | `state` | Store state of this version at the end, such as `PENDING_REVIEW`, `STAGED` or `PUBLISHED`. Empty when `result` is `uploaded`, or `dry-run` for an upload, or when the store reports no state after submitting |
-| `version` | The version read from `manifest.json` in the ZIP, or the published version the run raised when no package is given |
+| `version` | The version read from `manifest.json` in the ZIP, or with `rollout-only` the published version the run raised |
 
 ## What it does
 
@@ -224,9 +239,9 @@ A service account key also works. Grant the service account `roles/iam.serviceAc
 3. Stops here on a dry run.
 4. Waits first if an earlier upload is still processing. Then uploads the package, the ZIP or the CRX as is, stops if the store reports a different version for it, and checks the status every 10 seconds, up to 30 times, while the store processes it. A check that fails with a network error or HTTP 429, 500, 502, 503 or 504 counts as one of the 30, and three such failures in a row end the run. If processing takes longer, the run fails without submitting. The store may still finish the package as a draft, or the upload may fail, so check the dashboard before re-running.
 5. Submits the version for review, unless `publish` is `false`, with `deploy-percentage`, `skip-review` and `block-on-warnings` when given. Warnings the store returns appear as warning annotations.
-
-Without `zip` or `crx`, the action only fetches the status and raises the rollout of the newest published version to `deploy-percentage`.
 6. Reads the status once more. If a different version is now in review, another writer replaced the package before this run submitted it. The run fails to report that, but the other package is already submitted.
+
+With `rollout-only`, the action only fetches the status and raises the rollout of the newest published version to `deploy-percentage`.
 
 Store errors are reported with the HTTP status, the store's message and a hint for the common causes.
 
@@ -320,10 +335,10 @@ If you release from a branch instead of tags, replace `assertion.ref_type == 'ta
 | --- | --- |
 | Refresh token flow only | `POST https://oauth2.googleapis.com/token` with the client ID, client secret and refresh token |
 | Always | `GET https://chromewebstore.googleapis.com/v2/publishers/{publisher-id}/items/{item-id}:fetchStatus` |
-| Unless skipped, refused or a dry run | `POST https://chromewebstore.googleapis.com/upload/v2/publishers/{publisher-id}/items/{item-id}:upload` with the ZIP, or with the CRX plus the `X-Goog-Upload-Protocol: raw` and `X-Goog-Upload-File-Name` headers Google documents for it |
+| Unless skipped, refused, raised or a dry run | `POST https://chromewebstore.googleapis.com/upload/v2/publishers/{publisher-id}/items/{item-id}:upload` with the ZIP, or with the CRX plus the `X-Goog-Upload-Protocol: raw` and `X-Goog-Upload-File-Name` headers Google documents for it |
 | While an earlier upload or this one is processing | `GET ...:fetchStatus` again, every 10 seconds, up to 30 times |
 | After a successful upload, unless `publish` is `false` | `POST https://chromewebstore.googleapis.com/v2/publishers/{publisher-id}/items/{item-id}:publish` with `{"publishType": ...}`, plus `deployInfos`, `skipReview` and `blockOnWarnings` when their inputs are set |
-| When `deploy-percentage` raises a published version, unless a dry run | `POST https://chromewebstore.googleapis.com/v2/publishers/{publisher-id}/items/{item-id}:setPublishedDeployPercentage` with `{"deployPercentage": ...}` |
+| When `deploy-percentage` raises a published version, with a ZIP or CRX of that version or with `rollout-only`, unless a dry run | `POST https://chromewebstore.googleapis.com/v2/publishers/{publisher-id}/items/{item-id}:setPublishedDeployPercentage` with `{"deployPercentage": ...}` |
 | After submitting | `GET ...:fetchStatus` once, to confirm which version is in review |
 
 The hosts are fixed in the code. There is no input to change them, redirects are refused rather than followed, and the test settings described under [Development](#development) only accept loopback addresses. `publisher-id` and `item-id` are validated before they are placed in a URL.
@@ -339,7 +354,7 @@ The hosts are fixed in the code. There is no input to change them, redirects are
 
 | File | Lines | Role |
 | --- | --- | --- |
-| [`src/main.ts`](src/main.ts) | ~150 | Reads and validates inputs, masks secrets, sets outputs |
+| [`src/main.ts`](src/main.ts) | ~160 | Reads and validates inputs, masks secrets, sets outputs |
 | [`src/store.ts`](src/store.ts) | ~400 | The store calls, their response types and the state decisions |
 | [`src/zip.ts`](src/zip.ts) | ~130 | Reads `manifest.json` from the ZIP, with checksum verification |
 | [`src/token.ts`](src/token.ts) | ~50 | Refresh token exchange |

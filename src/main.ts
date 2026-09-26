@@ -37,6 +37,7 @@ async function main(): Promise<void> {
   const deployPercentageInput = getInput('deploy-percentage');
   const skipReview = getBooleanInput('skip-review', false);
   const blockOnWarnings = getBooleanInput('block-on-warnings', false);
+  const rolloutOnly = getBooleanInput('rollout-only', false);
 
   if (!PUBLISHER_ID.test(publisherId)) throw new ActionError('Input publisher-id must contain only letters, digits, hyphens and underscores.');
   if (!ITEM_ID.test(itemId)) throw new ActionError('Input item-id must be the 32 letter extension ID shown in the Developer Dashboard.');
@@ -60,8 +61,15 @@ async function main(): Promise<void> {
     );
   }
   if (zipPath && crxPath) throw new ActionError('Pass either zip or crx, not both.');
-  if (!zipPath && !crxPath && deployPercentage === undefined) {
-    throw new ActionError('Input zip is required, or crx for an item opted in to Verified CRX Uploads, or deploy-percentage alone to raise the rollout of the published version.');
+  if (rolloutOnly) {
+    if (deployPercentage === undefined) throw new ActionError('Input rollout-only needs deploy-percentage, the share of users to raise the published version to.');
+    const conflicts = [zipPath && 'zip', crxPath && 'crx', skipReview && 'skip-review', blockOnWarnings && 'block-on-warnings', publishType === 'STAGED_PUBLISH' && 'publish-type staged'].filter(Boolean);
+    if (conflicts.length > 0) throw new ActionError(`Input rollout-only only raises the rollout of the published version, so it cannot be combined with ${conflicts.join(', ')}.`);
+  } else if (!zipPath && !crxPath) {
+    throw new ActionError('Input zip is required, or crx for an item opted in to Verified CRX Uploads. To raise the rollout of the published version without a package, set rollout-only and deploy-percentage.');
+  }
+  if (!submit && (deployPercentage !== undefined || skipReview || blockOnWarnings)) {
+    throw new ActionError('Inputs deploy-percentage, skip-review and block-on-warnings need publish: true, because the store applies them only when it publishes.');
   }
   if (accessToken && !HEADER_SAFE.test(accessToken)) {
     throw new ActionError('Input access-token contains spaces or control characters. Pass the access_token output of google-github-actions/auth, not a JSON key.');
@@ -93,7 +101,7 @@ async function main(): Promise<void> {
   }
 
   if (!packageFile) {
-    const raised = await raiseRollout({ token, publisherId, itemId, deployPercentage: deployPercentage ?? 100, dryRun, apiBase, log: info });
+    const raised = await raiseRollout({ token, publisherId, itemId, deployPercentage: deployPercentage!, dryRun, apiBase, log: info });
     setOutput('version', raised.version);
     setOutput('result', raised.result);
     setOutput('state', raised.state);

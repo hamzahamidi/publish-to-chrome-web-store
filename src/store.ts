@@ -108,6 +108,7 @@ const REVIEW_STATES = new Set(['PENDING_REVIEW', 'STAGED']);
 const MUST_USE_CRX = /PKG_MUST_UPDATE_AS_CRX|update your item with a crx/i;
 const USE_CRX_HINT = 'This item is opted in to Verified CRX Uploads, so the store only accepts a CRX signed with your key. Pass it through the crx input.';
 const CRX_REFUSED_HINT = 'If the store refused the CRX itself, check that the item is opted in to Verified CRX Uploads and that the CRX is signed with the key registered on its Package tab.';
+const SKIP_REVIEW_HINT = 'With skip-review the store refuses a submission that needs review, and the uploaded package stays as a draft. Remove skip-review for this release.';
 const ROLLOUT_HINT = 'Google lets the API set a rollout percentage only for items with more than 10,000 seven-day active users, and only upward.';
 
 function storeClient({ token, apiBase, requestTimeoutMs, crxFileName }: ClientOptions): Call {
@@ -364,7 +365,7 @@ export async function publishToStore({
       ...(skipReview ? { skipReview: true } : {}),
       ...(blockOnWarnings ? { blockOnWarnings: true } : {}),
     }),
-    hint: deployPercentage === undefined ? PUBLISH_HINT : `${PUBLISH_HINT} ${ROLLOUT_HINT}`,
+    hint: [PUBLISH_HINT, deployPercentage !== undefined && ROLLOUT_HINT, skipReview && SKIP_REVIEW_HINT].filter(Boolean).join(' '),
   });
   log(`Submitted version ${version}${skipReview ? ' asking to skip review' : ' for review'}${deployPercentage === undefined ? '' : ` to ${deployPercentage}% of users`}. Store state: ${publish.state ?? 'unknown'}.`);
   const warnings = publish.warningInfo?.warnings;

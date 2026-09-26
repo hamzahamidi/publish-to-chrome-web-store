@@ -475,6 +475,19 @@ describe('publishToStore', () => {
     );
   });
 
+  it('tells a refused skip-review how to recover', async () => {
+    store.on(FETCH, storeStatus());
+    store.on(UPLOAD, { body: { uploadState: 'SUCCEEDED' } });
+    store.on(PUBLISH, { status: 400, body: { error: { code: 400, message: 'Item requires review.' } } });
+    const error = await rejection(publish('1.0.0', { skipReview: true }));
+    assert.match(error.details ?? '', /With skip-review the store refuses a submission that needs review/);
+    store.reset();
+    store.on(FETCH, storeStatus());
+    store.on(UPLOAD, { body: { uploadState: 'SUCCEEDED' } });
+    store.on(PUBLISH, { status: 400, body: { error: { code: 400, message: 'Bad request.' } } });
+    assert.doesNotMatch((await rejection(publish('1.0.0'))).details ?? '', /skip-review|10,000/);
+  });
+
   it('passes store warnings on', async () => {
     store.on(FETCH, storeStatus());
     store.on(UPLOAD, { body: { uploadState: 'SUCCEEDED' } });

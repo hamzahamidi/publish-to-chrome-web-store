@@ -40,14 +40,19 @@ inputs:
     required: false
     default: 'false'
   deploy-percentage:
-    description: Share of users, 0 to 100, who get the version. On submit it sets the initial rollout. For a version already published, or with no zip or crx, it raises the published rollout. Google allows this only for items with more than 10,000 seven-day active users, and only upward.
+    description: Share of users, 0 to 100, who get the version. On submit it sets the initial rollout. For a zip or crx of the version already published, or with rollout-only, it raises the published rollout. Google allows this only for items with more than 10,000 seven-day active users, and only upward. Needs publish true.
+    required: false
+  rollout-only:
+    description: Set to true, with deploy-percentage and no zip or crx, to raise the rollout of the newest published version without uploading anything.
+    required: false
+    default: 'false'
     required: false
   skip-review:
-    description: Ask the store to publish without review. The store refuses when the change needs review.
+    description: Ask the store to publish without review. The store refuses the submission when the change needs review, and the run fails with the package left as a draft. Needs publish true.
     required: false
     default: 'false'
   block-on-warnings:
-    description: Make the store fail the submission when validation raises warnings, instead of passing them on.
+    description: Make the store fail the submission when validation raises warnings, instead of passing them on. Needs publish true.
     required: false
     default: 'false'
   publish-type:
@@ -57,11 +62,11 @@ inputs:
 
 outputs:
   result:
-    description: submitted, uploaded (publish was false), skipped (this version was already in the store), raised (the rollout of the published version went up) or dry-run.
+    description: submitted, uploaded (publish was false), skipped (this version was already in the store, or its rollout already reached deploy-percentage), raised (the rollout of the published version went up) or dry-run.
   state:
-    description: Store state of this version when the action finished, such as PENDING_REVIEW, STAGED or PUBLISHED. Empty when result is uploaded or dry-run, or when the store reports no state after submitting.
+    description: Store state of this version when the action finished, such as PENDING_REVIEW, STAGED or PUBLISHED. Empty when result is uploaded, or dry-run for an upload, or when the store reports no state after submitting.
   version:
-    description: Version read from manifest.json in the ZIP, or in the ZIP inside the CRX.
+    description: Version read from manifest.json in the ZIP, or in the ZIP inside the CRX. With rollout-only, the published version the run raised.
 
 runs:
   using: node24
