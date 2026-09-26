@@ -217,7 +217,7 @@ A service account key also works. Grant the service account `roles/iam.serviceAc
 | --- | --- |
 | `result` | `submitted`, `uploaded` (when `publish` is `false`), `skipped` (this version was already in the store, or its rollout already reached `deploy-percentage`), `raised` (the rollout of the published version went up) or `dry-run` (a dry run that would upload or raise) |
 | `state` | Store state of this version at the end, such as `PENDING_REVIEW`, `STAGED` or `PUBLISHED`. Empty when `result` is `uploaded`, or `dry-run` for an upload, or when the store reports no state after submitting |
-| `version` | The version read from `manifest.json` in the ZIP, or with `rollout-only` the newest published version |
+| `version` | The version read from `manifest.json` in the ZIP, or in the ZIP inside the CRX, or with `rollout-only` the newest published version |
 
 ## What it does
 
@@ -365,7 +365,7 @@ The hosts are fixed in the code. There is no input to change them, redirects are
 
 ### How it is checked
 
-- Every pull request type-checks the code and runs the tests on Linux, Windows and macOS with a coverage floor of 95% of lines. The tests start the action's entry point against a mock store on all three, and a separate job runs the action from `action.yml`. See [ci.yml](.github/workflows/ci.yml).
+- Every pull request type-checks the code and runs the tests on Linux, Windows and macOS with a coverage floor of 95% of lines. The tests start the action's entry point against a mock store on all three, and two separate jobs run the action from `action.yml`: one uploads a ZIP, the other signs a CRX with `sign/action.yml` and uploads it. See [ci.yml](.github/workflows/ci.yml).
 - [CodeQL](.github/workflows/codeql.yml) scans the JavaScript and the workflows on every pull request, every push to `main` and weekly. Dependabot keeps the workflow actions current.
 - Releases are immutable: once `v1.0.0` is published, its tag and contents cannot change. `v1` points at the newest `1.x` release. [The workflow that moves it](.github/workflows/major-tag.yml) always points `v1` at the highest `1.x.y` release, refuses one that is not immutable, and runs one release at a time. If your organization requires full commit SHAs, pin the commit of a release.
 
