@@ -2,7 +2,10 @@
 
 ## 1.2.1
 
-- The Marketplace description and the README opening lead with publishing through a short-lived token, and the README starts with a quick start and a short comparison. Documentation only: the code is unchanged.
+- The Marketplace description and the README opening lead with publishing through a short-lived token, and the README starts with a quick start and a short comparison.
+- The README Limits section separates what the action does not do from what the Chrome Web Store imposes on any publishing tool.
+- llms.txt describes the CRX input and the rollout raise through a published package.
+- Documentation only: the code is unchanged from 1.2.0.
 
 ## 1.2.0
 
