@@ -4,13 +4,13 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
-import { ActionError } from '../src/errors.mjs';
-import { readManifest } from '../src/zip.mjs';
-import { extensionZip, makeZip } from './helpers.mjs';
+import { ActionError } from '../src/errors.ts';
+import { readManifest } from '../src/zip.ts';
+import { extensionZip, makeZip } from './helpers.ts';
 
-const manifest = (version) => JSON.stringify({ manifest_version: 3, name: 'Test', version });
+const manifest = (version: string) => JSON.stringify({ manifest_version: 3, name: 'Test', version });
 
-function fails(zip, pattern) {
+function fails(zip: Buffer, pattern: RegExp) {
   assert.throws(
     () => readManifest(zip, 'ext.zip'),
     (error) => error instanceof ActionError && pattern.test(error.message),

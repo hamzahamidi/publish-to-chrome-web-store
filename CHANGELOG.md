@@ -11,4 +11,5 @@ First release.
 - `publish-type: staged` keeps an approved version waiting up to 30 days for you to publish it in the dashboard or through the API.
 - Waits for an earlier upload that is still processing, refuses to submit when the store reports another version for the uploaded package, and reads the status again after submitting to detect a competing writer.
 - Refuses packages over 2 GB before reading them.
+- Written in TypeScript that Node 24 runs directly, with no bundle and no runtime dependencies.
 - Masks every credential input and any minted token before the first log line, and refuses redirects so credentials only reach Google's two hosts.

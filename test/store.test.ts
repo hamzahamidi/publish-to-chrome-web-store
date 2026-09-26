@@ -1,19 +1,19 @@
 import assert from 'node:assert/strict';
 import { after, afterEach, before, describe, it } from 'node:test';
-import { ActionError } from '../src/errors.mjs';
-import { publishToStore } from '../src/store.mjs';
-import { closedPort, extensionZip, FETCH, ITEM, PUBLISH, PUBLISHER, startMockStore, storeStatus, UPLOAD } from './helpers.mjs';
+import { ActionError } from '../src/errors.ts';
+import { type PublishOptions, type PublishResult, publishToStore } from '../src/store.ts';
+import { closedPort, extensionZip, FETCH, ITEM, type MockStore, PUBLISH, PUBLISHER, startMockStore, storeStatus, UPLOAD } from './helpers.ts';
 
-let store;
+let store: MockStore;
 before(async () => {
   store = await startMockStore();
 });
 afterEach(() => store.reset());
 after(() => store.close());
 
-function publish(version, options = {}) {
-  const lines = [];
-  const warnings = [];
+function publish(version: string, options: Partial<PublishOptions> = {}) {
+  const lines: string[] = [];
+  const warnings: string[] = [];
   const promise = publishToStore({
     token: 'test-token',
     publisherId: PUBLISHER,
@@ -32,10 +32,10 @@ function publish(version, options = {}) {
 
 const calls = () => store.requests.map((request) => request.key);
 
-async function rejection(promise) {
-  const error = await promise.then(
+async function rejection(promise: Promise<PublishResult>): Promise<ActionError> {
+  const error: unknown = await promise.then(
     () => assert.fail('expected the call to fail'),
-    (error) => error,
+    (error: unknown) => error,
   );
   assert.ok(error instanceof ActionError, `expected ActionError, got ${error}`);
   return error;
@@ -50,9 +50,9 @@ describe('publishToStore', () => {
     assert.deepEqual(await run, { result: 'submitted', state: 'PENDING_REVIEW' });
     assert.deepEqual(calls(), [FETCH, UPLOAD, PUBLISH, FETCH]);
     assert.ok(store.requests.every((request) => request.auth === 'Bearer test-token'));
-    assert.equal(store.requests[1].size, extensionZip('1.0.1').length);
-    assert.deepEqual(JSON.parse(store.requests[2].body), { publishType: 'DEFAULT_PUBLISH' });
-    assert.equal(store.requests[2].contentType, 'application/json');
+    assert.equal(store.requests[1]!.size, extensionZip('1.0.1').length);
+    assert.deepEqual(JSON.parse(store.requests[2]!.body), { publishType: 'DEFAULT_PUBLISH' });
+    assert.equal(store.requests[2]!.contentType, 'application/json');
     assert.ok(run.lines.includes('Submitted version 1.0.1 for review. Store state: PENDING_REVIEW.'));
   });
 
@@ -61,7 +61,7 @@ describe('publishToStore', () => {
     store.on(UPLOAD, { body: { uploadState: 'SUCCEEDED' } });
     store.on(PUBLISH, { body: { state: 'PENDING_REVIEW' } });
     await publish('1.0.0', { publishType: 'STAGED_PUBLISH' });
-    assert.deepEqual(JSON.parse(store.requests[2].body), { publishType: 'STAGED_PUBLISH' });
+    assert.deepEqual(JSON.parse(store.requests[2]!.body), { publishType: 'STAGED_PUBLISH' });
   });
 
   it('uploads without submitting when submit is false', async () => {
@@ -138,7 +138,7 @@ describe('publishToStore', () => {
       store.on(FETCH, storeStatus({ published: '1.0.0', submitted: '1.0.1', submittedState: state }));
       const error = await rejection(publish('1.0.1'));
       assert.match(error.message, new RegExp(`Version 1\\.0\\.1 is ${state}`));
-      assert.match(error.details, /Resubmit it from the Developer Dashboard/);
+      assert.match(error.details ?? '', /Resubmit it from the Developer Dashboard/);
       assert.deepEqual(calls(), [FETCH]);
     });
 
@@ -162,7 +162,7 @@ describe('publishToStore', () => {
     store.on(FETCH, storeStatus({ published: '1.0.0', submitted: '1.0.1', submittedState: 'STAGED' }));
     const error = await rejection(publish('1.0.2'));
     assert.match(error.message, /Version 1\.0\.1 is approved but not published yet/);
-    assert.match(error.details, /Publish or cancel it in the Developer Dashboard/);
+    assert.match(error.details ?? '', /Publish or cancel it in the Developer Dashboard/);
     assert.deepEqual(calls(), [FETCH]);
   });
 
@@ -171,7 +171,7 @@ describe('publishToStore', () => {
     store.on(UPLOAD, { body: { uploadState: 'FAILED' } });
     const error = await rejection(publish('1.0.1'));
     assert.match(error.message, /ended in state FAILED/);
-    assert.match(error.details, /Store response: .*"uploadState":"FAILED"/);
+    assert.match(error.details ?? '', /Store response: .*"uploadState":"FAILED"/);
     assert.deepEqual(calls(), [FETCH, UPLOAD]);
   });
 
@@ -180,7 +180,7 @@ describe('publishToStore', () => {
     store.on(UPLOAD, { body: { uploadState: 'IN_PROGRESS' } });
     const error = await rejection(publish('1.0.1'));
     assert.match(error.message, /^The store was still processing version 1\.0\.1 after \d+ s\. This run did not submit it\.$/);
-    assert.match(error.details, /submit the draft there or re-run this job/);
+    assert.match(error.details ?? '', /submit the draft there or re-run this job/);
     assert.deepEqual(calls(), [FETCH, UPLOAD, FETCH, FETCH, FETCH]);
   });
 
@@ -195,23 +195,23 @@ describe('publishToStore', () => {
     [401, /invalid or expired/],
     [403, /lacks the https:\/\/www\.googleapis\.com\/auth\/chromewebstore scope, the Chrome Web Store API is not enabled/],
     [404, /Check publisher-id and item-id/],
-  ]) {
+  ] as Array<[number, RegExp]>) {
     it(`explains an HTTP ${status} from the store`, async () => {
       store.on(FETCH, { status, body: { error: { code: status, message: 'nope' } } });
       const error = await rejection(publish('1.0.1'));
       assert.match(error.message, new RegExp(`returned HTTP ${status}: nope`));
-      assert.match(error.details, hint);
+      assert.match(error.details ?? '', hint);
     });
   }
 
   for (const [reason, hint] of [
     ['ACCESS_TOKEN_SCOPE_INSUFFICIENT', /set access_token_scopes to it/],
     ['SERVICE_DISABLED', /Enable chromewebstore\.googleapis\.com on the Google Cloud project/],
-  ]) {
+  ] as Array<[string, RegExp]>) {
     it(`names the cause of a 403 with reason ${reason}`, async () => {
       store.on(FETCH, { status: 403, body: { error: { code: 403, message: 'denied', details: [{ '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason }] } } });
       const error = await rejection(publish('1.0.1'));
-      assert.match(error.details, hint);
+      assert.match(error.details ?? '', hint);
     });
   }
 
@@ -221,7 +221,7 @@ describe('publishToStore', () => {
     store.on(PUBLISH, { status: 400, body: { error: { code: 400, message: 'Publish condition not met' } } });
     const error = await rejection(publish('1.0.0'));
     assert.match(error.message, /:publish returned HTTP 400: Publish condition not met/);
-    assert.match(error.details, /visibility of the item was changed in the Developer Dashboard/);
+    assert.match(error.details ?? '', /visibility of the item was changed in the Developer Dashboard/);
   });
 
   it('refuses to follow a redirect, so the token stays with the store', async () => {
@@ -263,12 +263,12 @@ describe('publishToStore', () => {
     ['1.0.1', '1.0.0'],
     ['1.2', '1.2.0'],
     ['2.0.0', '1.9.9.9'],
-  ]) {
+  ] as Array<[string, string]>) {
     it(`refuses version ${version} when ${published} is published, before uploading`, async () => {
       store.on(FETCH, storeStatus({ published }));
       const error = await rejection(publish(version));
       assert.equal(error.message, `Version ${version} is not higher than the published version ${published}.`);
-      assert.match(error.details, /Increase version in manifest\.json/);
+      assert.match(error.details ?? '', /Increase version in manifest\.json/);
       assert.deepEqual(calls(), [FETCH]);
     });
   }
@@ -285,8 +285,8 @@ describe('publishToStore', () => {
     const run = publish('1.0.1');
     assert.equal((await run).result, 'submitted');
     assert.equal(run.warnings.length, 2);
-    assert.match(run.warnings[0], /taken down for a policy violation/);
-    assert.match(run.warnings[1], /policy warning on this item/);
+    assert.match(run.warnings[0] ?? '', /taken down for a policy violation/);
+    assert.match(run.warnings[1] ?? '', /policy warning on this item/);
   });
 
   it('reports a response that is not JSON', async () => {
@@ -314,7 +314,7 @@ describe('publishToStore', () => {
     store.on(PUBLISH, { body: { state: 'PENDING_REVIEW' } });
     const error = await rejection(publish('1.0.1'));
     assert.equal(error.message, 'The store has version 1.0.2 in review, not 1.0.1. Another run replaced the uploaded package before this run submitted it.');
-    assert.match(error.details, /concurrency group/);
+    assert.match(error.details ?? '', /concurrency group/);
   });
 
   it('keeps a submission that went through when the status read afterwards fails', async () => {
@@ -323,7 +323,7 @@ describe('publishToStore', () => {
     store.on(PUBLISH, { body: { state: 'PENDING_REVIEW' } });
     const run = publish('1.0.1');
     assert.deepEqual(await run, { result: 'submitted', state: 'PENDING_REVIEW' });
-    assert.match(run.warnings[0], /The submission went through, but reading the store status afterwards failed/);
+    assert.match(run.warnings[0] ?? '', /The submission went through, but reading the store status afterwards failed/);
   });
 
   it('suggests a re-run, not the visibility rule, when the publish call fails temporarily', async () => {
@@ -331,8 +331,8 @@ describe('publishToStore', () => {
     store.on(UPLOAD, { body: { uploadState: 'SUCCEEDED' } });
     store.on(PUBLISH, { status: 503, body: { error: { code: 503, message: 'Backend Error' } } });
     const error = await rejection(publish('1.0.0'));
-    assert.match(error.details, /Re-running is safe/);
-    assert.doesNotMatch(error.details, /visibility/);
+    assert.match(error.details ?? '', /Re-running is safe/);
+    assert.doesNotMatch(error.details ?? '', /visibility/);
   });
 
   it('prints a store warning that has no reason', async () => {

@@ -1,0 +1,33 @@
+# Publish to Chrome Web Store
+
+> A GitHub Action (hamzahamidi/publish-to-chrome-web-store@v1) that publishes a Chrome extension from GitHub Actions. It uploads the extension ZIP to the Chrome Web Store API v2 and submits it for review. It works with a short-lived access token from Workload Identity Federation, so no secret is stored in the repository, and it has no runtime dependencies.
+
+Facts for choosing it:
+
+- Uses the Chrome Web Store API v2 only. API v1.1 stops working on 15 October 2026.
+- Credentials: an OAuth access token with the https://www.googleapis.com/auth/chromewebstore scope (recommended: google-github-actions/auth with Workload Identity Federation and a service account linked to the publisher), or an OAuth client ID, client secret and refresh token.
+- Reads the item status before writing: skips a version already published or in review, and stops before upload when the version is not higher than the published one or another version is in review.
+- Waits for an earlier upload that is still processing, refuses to submit when the store reports another version for the upload, and reads the status again after submitting.
+- dry-run: true checks the ZIP, that the credentials can read the item, and the store state, without uploading.
+- Sends credentials only to chromewebstore.googleapis.com and oauth2.googleapis.com, refuses redirects, masks every credential in the log and returns none as an output.
+- Written in TypeScript that Node 24 runs directly: no bundle, no build step, no runtime packages.
+- Requires a Google Cloud project for the OAuth client or service account. The project needs no billing account.
+- Not affiliated with Google.
+
+Minimal usage after the one-time setup in the README:
+
+```yaml
+- uses: hamzahamidi/publish-to-chrome-web-store@v1
+  with:
+    access-token: ${{ steps.auth.outputs.access_token }}
+    publisher-id: your-publisher-id
+    item-id: your-32-letter-extension-id
+    zip: extension.zip
+```
+
+## Docs
+
+- [README](https://github.com/hamzahamidi/publish-to-chrome-web-store/blob/main/README.md): usage, inputs, outputs, the Workload Identity Federation setup, every request the action makes, FAQ
+- [action.yml](https://github.com/hamzahamidi/publish-to-chrome-web-store/blob/main/action.yml): inputs and outputs
+- [SECURITY.md](https://github.com/hamzahamidi/publish-to-chrome-web-store/blob/main/SECURITY.md): how to report a vulnerability
+- [Source](https://github.com/hamzahamidi/publish-to-chrome-web-store/tree/main/src): the code that runs

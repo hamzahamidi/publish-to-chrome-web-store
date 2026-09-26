@@ -1,11 +1,11 @@
 # Publish to Chrome Web Store
 
-A GitHub Action that uploads a Chrome extension ZIP to the Chrome Web Store and submits it for review, through the Chrome Web Store API v2.
+A GitHub Action that publishes a Chrome extension from GitHub Actions: it uploads the ZIP to the Chrome Web Store and submits it for review, through the Chrome Web Store API v2.
 
 - **No stored secret needed.** It takes a short-lived access token, which `google-github-actions/auth` can mint through Workload Identity Federation. Nothing long-lived sits in your repository secrets.
 - **Safe to re-run.** It reads the store status before writing anything. A version that is already published or in review is skipped. A version that the store would refuse, or a review in progress for another version, stops the run with a clear message before anything is uploaded.
 - **Approval before each upload.** The recommended setup only lets an approved job in one GitHub environment obtain the token.
-- **Readable and dependency free.** About 550 lines of plain JavaScript in `src/`, importing only Node.js built-ins. What you read is what runs: no bundle, no `node_modules`, no build step.
+- **Readable, typed, no runtime dependencies.** About 670 lines of TypeScript in `src/`, importing only Node.js built-ins. Node runs those files as they are: no bundle, no `dist/`, no build step, so what you read is what runs.
 - **Testable without risk.** `dry-run: true` checks your ZIP, that your credentials can read the item, and the store state, then stops before uploading.
 - **Existing setups work too.** It also accepts an OAuth client ID, client secret and refresh token.
 
@@ -148,6 +148,18 @@ A service account key also works. Grant the service account `roles/iam.serviceAc
 
 Store errors are reported with the HTTP status, the store's message and a hint for the common causes.
 
+## How it compares
+
+Checked on 26 September 2026 from each repository's `action.yml` and `package.json`.
+
+| Action | Store API | Credentials it accepts | Runtime packages | What the runner executes |
+| --- | --- | --- | --- | --- |
+| This action | v2 | Access token (for example from Workload Identity Federation), or OAuth refresh token | None | The TypeScript source in `src/` |
+| [mnao305/chrome-extension-upload](https://github.com/mnao305/chrome-extension-upload) | v2 | OAuth refresh token | 3 | A bundled `dist/index.js` |
+| [wdzeng/chrome-extension](https://github.com/wdzeng/chrome-extension) | v2 | OAuth refresh token | 3 | A bundled `index.cjs` |
+| [cssnr/webstore-publish-action](https://github.com/cssnr/webstore-publish-action) | v2 | Bearer token, or a service account key | 5 | A bundled `dist/index.js` |
+| [PlasmoHQ/bpp](https://github.com/PlasmoHQ/bpp) | v1.1, which stops on 15 October 2026 | OAuth refresh token | None, bundled | `index.js`, declared for Node 20 |
+
 ## Setting up Workload Identity Federation
 
 You need the Google account that owns the Chrome Web Store publisher. The `gcloud` commands run in [Cloud Shell](https://shell.cloud.google.com) or anywhere `gcloud` is signed in. The `gh` commands need the [GitHub CLI](https://cli.github.com) signed in to an account with admin access to the repository. The resources below were created on a project with no billing account.
@@ -238,22 +250,22 @@ The hosts are fixed in the code. There is no input to change them, redirects are
 - It does not print credentials. `access-token`, `client-id`, `client-secret` and `refresh-token` are masked before the first log line, and a token minted from a refresh token is masked as soon as Google returns it, also before the first log line.
 - It does not return credentials. The outputs are `result`, `state` and `version`.
 - It writes no file other than its step outputs, starts no process and sends no telemetry.
-- It has no dependencies, not even development ones. `package.json` exists only to hold the test command.
+- It has no runtime dependencies. TypeScript and `@types/node` are development dependencies that type-check the code in CI; the runner never installs them.
 
 ### The code
 
 | File | Lines | Role |
 | --- | --- | --- |
-| [`src/main.mjs`](src/main.mjs) | ~110 | Reads and validates inputs, masks secrets, sets outputs |
-| [`src/store.mjs`](src/store.mjs) | ~230 | The store calls and the state decisions |
-| [`src/zip.mjs`](src/zip.mjs) | ~120 | Reads `manifest.json` from the ZIP, with checksum verification |
-| [`src/token.mjs`](src/token.mjs) | ~40 | Refresh token exchange |
-| [`src/runner.mjs`](src/runner.mjs) | ~50 | GitHub Actions inputs, outputs, masking and annotations |
-| [`src/errors.mjs`](src/errors.mjs) | ~15 | The error type for failures shown as an error annotation, and network error wording |
+| [`src/main.ts`](src/main.ts) | ~110 | Reads and validates inputs, masks secrets, sets outputs |
+| [`src/store.ts`](src/store.ts) | ~290 | The store calls, their response types and the state decisions |
+| [`src/zip.ts`](src/zip.ts) | ~130 | Reads `manifest.json` from the ZIP, with checksum verification |
+| [`src/token.ts`](src/token.ts) | ~50 | Refresh token exchange |
+| [`src/runner.ts`](src/runner.ts) | ~50 | GitHub Actions inputs, outputs, masking and annotations |
+| [`src/errors.ts`](src/errors.ts) | ~20 | The error type for failures shown as an error annotation, and network error wording |
 
 ### How it is checked
 
-- Every pull request runs the tests on Linux, Windows and macOS with a coverage floor of 95% of lines, and runs the action itself from `action.yml` against a mock store. See [ci.yml](.github/workflows/ci.yml).
+- Every pull request type-checks the code and runs the tests on Linux, Windows and macOS with a coverage floor of 95% of lines. The tests start the action's entry point against a mock store on all three, and a separate job runs the action from `action.yml`. See [ci.yml](.github/workflows/ci.yml).
 - [CodeQL](.github/workflows/codeql.yml) scans the JavaScript and the workflows on every pull request, every push to `main` and weekly. Dependabot keeps the workflow actions current.
 - Releases are immutable: once `v1.0.0` is published, its tag and contents cannot change. `v1` points at the newest `1.x` release. [The workflow that moves it](.github/workflows/major-tag.yml) always points `v1` at the highest `1.x.y` release, refuses one that is not immutable, and runs one release at a time. If your organization requires full commit SHAs, pin the commit of a release.
 
@@ -271,11 +283,41 @@ Report a vulnerability as described in [SECURITY.md](SECURITY.md).
 - Packages up to 2 GB, the store's limit. The upload request has 10 minutes to finish. ZIP64 archives are not supported.
 - Partial rollout (`deployPercentage`), skipping review and `blockOnWarnings` are not exposed.
 
+## FAQ
+
+### Do I need Google Cloud?
+
+Yes, a Google Cloud project, whichever credential you use. Google only issues Chrome Web Store API tokens to an OAuth client or a service account, and both belong to a project with the Chrome Web Store API enabled. The project runs nothing: it only holds that identity. The setup in this README was created on a project with no billing account.
+
+The refresh token route skips the service account and Workload Identity Federation, but still needs an OAuth client in a project, and it puts a long-lived secret in your repository.
+
+### Does it store a secret?
+
+Not with Workload Identity Federation. Each run exchanges GitHub's OIDC token for an access token that lasts 30 minutes. The only values stored in the repository are two identifiers.
+
+### Is it safe to re-run a release?
+
+Yes, when only one writer uploads to the item. A version already published or in review is skipped, and a version the store would refuse stops the run before anything is uploaded.
+
+### Can I try it without publishing?
+
+Yes. `dry-run: true` reads the ZIP, obtains the token and fetches the item status, then stops.
+
+### Does it work with private repositories and other operating systems?
+
+Yes. Private repositories work; only the approval environment depends on your GitHub plan. The tests run the action on Linux, Windows and macOS runners.
+
+### Is it made by Google?
+
+No. It is an independent open source project and calls Google's public API.
+
 ## Development
 
-Node.js 24 or later, no install step:
+Node.js 24 or later:
 
 ```bash
+npm ci
+npm run typecheck
 npm test
 ```
 

@@ -2,13 +2,13 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 import { after, afterEach, before, describe, it } from 'node:test';
-import { startMockStore } from './helpers.mjs';
+import { type MockStore, startMockStore } from './helpers.ts';
 
-const SCRIPT = resolve(import.meta.dirname, '../scripts/move-major-tag.mjs');
+const SCRIPT = resolve(import.meta.dirname, '../scripts/move-major-tag.ts');
 const REPO = '/repos/owner/action';
 const COMMIT = 'c0ffee'.padEnd(40, '0');
 const OLD_COMMIT = 'badbad'.padEnd(40, '0');
-let github;
+let github: MockStore;
 
 before(async () => {
   github = await startMockStore();
@@ -16,7 +16,7 @@ before(async () => {
 afterEach(() => github.reset());
 after(() => github.close());
 
-function run(tag) {
+function run(tag: string): Promise<{ code: number | null; stdout: string }> {
   return new Promise((done) => {
     const child = spawn(process.execPath, [SCRIPT], {
       env: { PATH: process.env.PATH ?? '', GITHUB_API_URL: github.base, GITHUB_REPOSITORY: 'owner/action', GITHUB_TOKEN: 'gh-token', TAG: tag },
@@ -28,9 +28,9 @@ function run(tag) {
   });
 }
 
-const release = (tag, extra = {}) => ({ tag_name: tag, draft: false, prerelease: false, immutable: true, ...extra });
+const release = (tag: string, extra: Record<string, unknown> = {}) => ({ tag_name: tag, draft: false, prerelease: false, immutable: true, ...extra });
 
-function setup(newestTag, list, { v1 = OLD_COMMIT } = {}) {
+function setup(newestTag: string, list: object[], { v1 = OLD_COMMIT }: { v1?: string | null } = {}) {
   github.on(`GET ${REPO}/releases?per_page=100&page=1`, { body: list });
   github.on(`GET ${REPO}/git/ref/tags/${newestTag}`, { body: { object: { type: 'commit', sha: COMMIT } } });
   if (v1) github.on(`GET ${REPO}/git/ref/tags/v1`, { body: { object: { type: 'commit', sha: v1 } } });
@@ -70,7 +70,7 @@ describe('move-major-tag', () => {
     github.on(`PATCH ${REPO}/git/refs/tags/v1`, { body: {} });
     const result = await run('v1.0.0');
     assert.equal(result.code, 0, result.stdout);
-    assert.equal(JSON.parse(writes()[0].body).sha, COMMIT);
+    assert.equal(JSON.parse(writes()[0]!.body).sha, COMMIT);
   });
 
   it('keeps v1 on the newest release, compared by number, when an older patch is released', async () => {

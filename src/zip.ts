@@ -1,5 +1,5 @@
 import { crc32, inflateRawSync } from 'node:zlib';
-import { ActionError } from './errors.mjs';
+import { ActionError } from './errors.ts';
 
 const END_OF_CENTRAL_DIRECTORY = 0x06054b50;
 const CENTRAL_DIRECTORY_ENTRY = 0x02014b50;
@@ -7,11 +7,26 @@ const LOCAL_FILE_HEADER = 0x04034b50;
 const MAX_MANIFEST_BYTES = 1024 * 1024;
 const VERSION_PATTERN = /^(0|[1-9]\d{0,4})(\.(0|[1-9]\d{0,4})){0,3}$/;
 
-export function isExtensionVersion(version) {
+interface ZipEntry {
+  name: string;
+  flags: number;
+  method: number;
+  crc: number;
+  compressedSize: number;
+  size: number;
+  localOffset: number;
+}
+
+export interface Manifest {
+  version: string;
+  manifest: Record<string, unknown>;
+}
+
+export function isExtensionVersion(version: unknown): version is string {
   return typeof version === 'string' && VERSION_PATTERN.test(version) && version.split('.').every((part) => Number(part) <= 65535);
 }
 
-export function compareVersions(a, b) {
+export function compareVersions(a: string, b: string): number {
   const left = a.split('.').map(Number);
   const right = b.split('.').map(Number);
   for (let i = 0; i < 4; i++) {
@@ -21,7 +36,7 @@ export function compareVersions(a, b) {
   return 0;
 }
 
-export function readManifest(zip, label = 'the ZIP') {
+export function readManifest(zip: Buffer, label = 'the ZIP'): Manifest {
   if (zip.length >= 4 && zip.toString('latin1', 0, 4) === 'Cr24') {
     throw new ActionError(`${label} is a CRX package, not a ZIP. This action uploads ZIP packages only, so it cannot publish items opted in to Verified CRX Uploads.`);
   }
@@ -37,12 +52,12 @@ export function readManifest(zip, label = 'the ZIP') {
   }
   if (matches.length > 1) throw new ActionError(`${label} contains manifest.json more than once.`);
 
-  let manifest;
+  let manifest: Record<string, unknown>;
   try {
-    manifest = JSON.parse(extract(zip, matches[0], label).toString('utf8').replace(/^﻿/, ''));
+    manifest = JSON.parse(extract(zip, matches[0]!, label).toString('utf8').replace(/^﻿/, '')) as Record<string, unknown>;
   } catch (error) {
     if (error instanceof ActionError) throw error;
-    throw new ActionError(`manifest.json in ${label} is not valid JSON: ${error.message}`);
+    throw new ActionError(`manifest.json in ${label} is not valid JSON: ${(error as Error).message}`);
   }
   const version = manifest?.version;
   if (!isExtensionVersion(version)) {
@@ -51,7 +66,7 @@ export function readManifest(zip, label = 'the ZIP') {
   return { version, manifest };
 }
 
-function centralDirectory(zip, label) {
+function centralDirectory(zip: Buffer, label: string): ZipEntry[] {
   const end = findEndOfCentralDirectory(zip, label);
   const count = zip.readUInt16LE(end + 10);
   const size = zip.readUInt32LE(end + 12);
@@ -61,7 +76,7 @@ function centralDirectory(zip, label) {
   }
   if (start + size > end) throw new ActionError(`${label} is not a valid ZIP file (central directory out of range).`);
 
-  const entries = [];
+  const entries: ZipEntry[] = [];
   let offset = start;
   for (let i = 0; i < count; i++) {
     if (offset + 46 > end || zip.readUInt32LE(offset) !== CENTRAL_DIRECTORY_ENTRY) {
@@ -82,7 +97,7 @@ function centralDirectory(zip, label) {
   return entries;
 }
 
-function findEndOfCentralDirectory(zip, label) {
+function findEndOfCentralDirectory(zip: Buffer, label: string): number {
   const lowest = Math.max(0, zip.length - 22 - 0xffff);
   for (let offset = zip.length - 22; offset >= lowest; offset--) {
     if (zip.readUInt32LE(offset) === END_OF_CENTRAL_DIRECTORY) return offset;
@@ -90,7 +105,7 @@ function findEndOfCentralDirectory(zip, label) {
   throw new ActionError(`${label} is not a valid ZIP file.`);
 }
 
-function extract(zip, entry, label) {
+function extract(zip: Buffer, entry: ZipEntry, label: string): Buffer {
   if (entry.flags & 1) throw new ActionError(`manifest.json in ${label} is encrypted.`);
   if (entry.size > MAX_MANIFEST_BYTES) throw new ActionError(`manifest.json in ${label} is larger than 1 MiB.`);
   const header = entry.localOffset;
@@ -101,7 +116,7 @@ function extract(zip, entry, label) {
   const data = zip.subarray(dataStart, dataStart + entry.compressedSize);
   if (data.length !== entry.compressedSize) throw new ActionError(`${label} is truncated.`);
 
-  let content;
+  let content: Buffer;
   if (entry.method === 0) content = data;
   else if (entry.method === 8) {
     try {

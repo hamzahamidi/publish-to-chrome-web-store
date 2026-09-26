@@ -4,12 +4,12 @@ import { mkdtempSync, readFileSync, rmSync, truncateSync, writeFileSync } from '
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { after, afterEach, before, describe, it } from 'node:test';
-import { closedPort, extensionZip, FETCH, ITEM, makeZip, PUBLISH, PUBLISHER, startMockStore, storeStatus, UPLOAD } from './helpers.mjs';
+import { closedPort, extensionZip, FETCH, ITEM, makeZip, type MockStore, PUBLISH, PUBLISHER, startMockStore, storeStatus, UPLOAD } from './helpers.ts';
 
-const MAIN = resolve(import.meta.dirname, '../src/main.mjs');
+const MAIN = resolve(import.meta.dirname, '../src/main.ts');
 const TOKEN = 'ya29.test-access-token';
 const dir = mkdtempSync(join(tmpdir(), 'cws-action-'));
-let store;
+let store: MockStore;
 
 before(async () => {
   store = await startMockStore();
@@ -20,13 +20,19 @@ after(async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-function zipFile(version, name = `ext-${version}.zip`, content = extensionZip(version)) {
+function zipFile(version: string, name = `ext-${version}.zip`, content: Buffer = extensionZip(version)): string {
   const path = join(dir, name);
   writeFileSync(path, content);
   return path;
 }
 
-function runAction(inputs, env = {}) {
+interface ActionRun {
+  code: number | null;
+  stdout: string;
+  outputs: Record<string, string>;
+}
+
+function runAction(inputs: Record<string, string>, env: Record<string, string> = {}): Promise<ActionRun> {
   const output = join(dir, `output-${Math.random().toString(16).slice(2)}`);
   writeFileSync(output, '');
   const inputEnv = Object.fromEntries(Object.entries(inputs).map(([name, value]) => [`INPUT_${name.toUpperCase()}`, value]));
@@ -41,14 +47,14 @@ function runAction(inputs, env = {}) {
   });
 }
 
-function parseOutputs(text) {
-  const outputs = {};
+function parseOutputs(text: string): Record<string, string> {
+  const outputs: Record<string, string> = {};
   const pattern = /^([\w-]+)<<(EOF_[\w-]+)\r?\n([\s\S]*?)\r?\n\2\r?$/gm;
-  for (const match of text.matchAll(pattern)) outputs[match[1]] = match[3];
+  for (const match of text.matchAll(pattern)) if (match[1] !== undefined) outputs[match[1]] = match[3] ?? '';
   return outputs;
 }
 
-const baseInputs = (version, extra = {}) => ({
+const baseInputs = (version: string, extra: Record<string, string> = {}): Record<string, string> => ({
   'access-token': TOKEN,
   'publisher-id': PUBLISHER,
   'item-id': ITEM,
@@ -56,7 +62,7 @@ const baseInputs = (version, extra = {}) => ({
   ...extra,
 });
 
-const withoutMaskLines = (stdout) =>
+const withoutMaskLines = (stdout: string) =>
   stdout
     .split(/\r?\n/)
     .filter((line) => !line.startsWith('::add-mask::'))
@@ -99,7 +105,7 @@ describe('action', () => {
     store.on(PUBLISH, { body: { state: 'PENDING_REVIEW' } });
     const staged = await runAction(baseInputs('1.0.0', { 'publish-type': 'Staged' }));
     assert.equal(staged.code, 0, staged.stdout);
-    assert.deepEqual(JSON.parse(store.requests[2].body), { publishType: 'STAGED_PUBLISH' });
+    assert.deepEqual(JSON.parse(store.requests[2]!.body), { publishType: 'STAGED_PUBLISH' });
   });
 
   it('checks the credentials and the store state on a dry run, without uploading', async () => {
@@ -139,14 +145,14 @@ describe('action', () => {
       { CWS_TOKEN_ENDPOINT: `${store.base}/token` },
     );
     assert.equal(run.code, 0, run.stdout);
-    const form = new URLSearchParams(store.requests[0].body);
+    const form = new URLSearchParams(store.requests[0]!.body);
     assert.deepEqual(Object.fromEntries(form), {
       client_id: 'client.apps.googleusercontent.com',
       client_secret: 'shh-secret',
       refresh_token: '1//refresh',
       grant_type: 'refresh_token',
     });
-    assert.equal(store.requests[1].auth, 'Bearer ya29.minted');
+    assert.equal(store.requests[1]!.auth, 'Bearer ya29.minted');
     for (const secret of ['ya29.minted', 'client.apps.googleusercontent.com', 'shh-secret', '1//refresh']) {
       assert.ok(run.stdout.includes(`::add-mask::${secret}`), `expected ${secret} to be masked`);
       assert.ok(!withoutMaskLines(run.stdout).includes(secret), `${secret} leaked`);
@@ -168,7 +174,7 @@ describe('action', () => {
     assert.equal(store.requests.length, 1);
   });
 
-  const invalid = [
+  const invalid: Array<[string, Record<string, string>, RegExp]> = [
     ['no credentials', { 'access-token': '' }, /No credentials\./],
     ['both credential kinds', { 'refresh-token': 'x' }, /Pass either access-token or the client-id, client-secret and refresh-token trio, not both/],
     ['a partial refresh trio', { 'access-token': '', 'client-id': 'id', 'refresh-token': 'x' }, /Missing client-secret\./],

@@ -1,16 +1,79 @@
-import { ActionError, networkReason } from './errors.mjs';
-import { compareVersions, isExtensionVersion } from './zip.mjs';
+import { ActionError, networkReason } from './errors.ts';
+import { compareVersions, isExtensionVersion } from './zip.ts';
 
 export const STORE_API = 'https://chromewebstore.googleapis.com';
+
+export type PublishType = 'DEFAULT_PUBLISH' | 'STAGED_PUBLISH';
+
+export interface PublishOptions {
+  token: string;
+  publisherId: string;
+  itemId: string;
+  version: string;
+  zip: Buffer;
+  submit?: boolean;
+  dryRun?: boolean;
+  publishType?: PublishType;
+  apiBase?: string;
+  pollIntervalMs?: number;
+  pollAttempts?: number;
+  statusRetries?: number;
+  requestTimeoutMs?: number;
+  uploadTimeoutMs?: number;
+  log?: (line: string) => void;
+  warn?: (line: string) => void;
+}
+
+export interface PublishResult {
+  result: 'submitted' | 'uploaded' | 'skipped' | 'dry-run';
+  state: string;
+}
+
+interface DistributionChannel {
+  crxVersion?: unknown;
+  deployPercentage?: number;
+}
+
+interface RevisionStatus {
+  state?: string;
+  distributionChannels?: DistributionChannel[];
+}
+
+interface ItemStatus {
+  publishedItemRevisionStatus?: RevisionStatus;
+  submittedItemRevisionStatus?: RevisionStatus;
+  lastAsyncUploadState?: string;
+  takenDown?: boolean;
+  warned?: boolean;
+}
+
+interface UploadResponse {
+  uploadState?: string;
+  crxVersion?: unknown;
+}
+
+interface PublishResponse {
+  state?: string;
+  warningInfo?: { warnings?: Array<{ reason?: unknown; description?: unknown }> };
+}
+
+interface GoogleError {
+  error?: { message?: string; details?: Array<{ reason?: unknown }> };
+}
+
+interface CallOptions extends RequestInit {
+  timeoutMs?: number;
+  hint?: string;
+}
 
 const SETTLED_STATES = new Set(['PENDING_REVIEW', 'STAGED', 'PUBLISHED', 'PUBLISHED_TO_TESTERS']);
 const UPLOADING_STATES = new Set(['IN_PROGRESS', 'UPLOAD_IN_PROGRESS']);
 const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
-const REASON_HINTS = {
+const REASON_HINTS: Record<string, string> = {
   ACCESS_TOKEN_SCOPE_INSUFFICIENT: 'The token lacks the https://www.googleapis.com/auth/chromewebstore scope. With google-github-actions/auth, set access_token_scopes to it.',
   SERVICE_DISABLED: 'Enable chromewebstore.googleapis.com on the Google Cloud project that owns the service account or the OAuth client.',
 };
-const STATUS_HINTS = {
+const STATUS_HINTS: Record<number, string> = {
   401: 'The store rejected the access token as invalid or expired. Mint it in the same job, with a lifetime longer than the job needs.',
   403: 'The token lacks the https://www.googleapis.com/auth/chromewebstore scope, the Chrome Web Store API is not enabled on the project behind the token, the account is neither the publisher nor its linked service account, or publisher-id is wrong.',
   404: 'The store does not know this item. Check publisher-id and item-id.',
@@ -36,18 +99,18 @@ export async function publishToStore({
   uploadTimeoutMs = 600_000,
   log = () => {},
   warn = () => {},
-}) {
+}: PublishOptions): Promise<PublishResult> {
   const item = `publishers/${publisherId}/items/${itemId}`;
-  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-  async function call(method, path, { timeoutMs = requestTimeoutMs, hint, ...init } = {}) {
-    let response;
-    let text;
+  async function call<T>(method: string, path: string, { timeoutMs = requestTimeoutMs, hint, ...init }: CallOptions = {}): Promise<T> {
+    let response: Response;
+    let text: string;
     try {
       response = await fetch(apiBase + path, {
         method,
         ...init,
-        headers: { Authorization: `Bearer ${token}`, ...init.headers },
+        headers: { Authorization: `Bearer ${token}`, ...(init.headers as Record<string, string> | undefined) },
         redirect: 'manual',
         signal: AbortSignal.timeout(timeoutMs),
       });
@@ -66,27 +129,28 @@ export async function publishToStore({
         { retryable: true },
       );
     }
-    let body;
+    let body: unknown;
     try {
       body = text ? JSON.parse(text) : {};
     } catch {
       body = undefined;
     }
     if (!response.ok) {
-      const reason = body?.error?.message ?? text.slice(0, 2000);
-      const details = Array.isArray(body?.error?.details) ? body.error.details : [];
-      const detailReason = details.find((detail) => typeof detail?.reason === 'string')?.reason;
+      const googleError = (body as GoogleError | undefined)?.error;
+      const reason = googleError?.message ?? text.slice(0, 2000);
+      const details = Array.isArray(googleError?.details) ? googleError.details : [];
+      const detailReason = details.map((detail) => detail?.reason).find((each): each is string => typeof each === 'string');
       const retryable = RETRYABLE_STATUSES.has(response.status);
       const fallback = retryable ? (method === 'POST' ? RERUN_HINT : undefined) : hint;
-      throw new ActionError(`${method} ${path} returned HTTP ${response.status}: ${reason}`, REASON_HINTS[detailReason] ?? STATUS_HINTS[response.status] ?? fallback, { retryable });
+      throw new ActionError(`${method} ${path} returned HTTP ${response.status}: ${reason}`, (detailReason && REASON_HINTS[detailReason]) || STATUS_HINTS[response.status] || fallback, { retryable });
     }
     if (body === undefined || body === null || typeof body !== 'object') {
       throw new ActionError(`${method} ${path} returned a response that is not JSON: ${text.slice(0, 2000)}`);
     }
-    return body;
+    return body as T;
   }
 
-  const fetchStatus = () => call('GET', `/v2/${item}:fetchStatus`);
+  const fetchStatus = () => call<ItemStatus>('GET', `/v2/${item}:fetchStatus`);
 
   const status = await fetchStatus();
   const published = status.publishedItemRevisionStatus;
@@ -99,15 +163,16 @@ export async function publishToStore({
 
   if (publishedVersions.includes(version)) {
     log(`Version ${version} is already published. Nothing to upload.`);
-    return { result: 'skipped', state: published.state ?? 'PUBLISHED' };
+    return { result: 'skipped', state: published?.state ?? 'PUBLISHED' };
   }
   if (submittedVersions.includes(version)) {
-    if (SETTLED_STATES.has(submitted.state)) {
-      log(`Version ${version} is already ${submitted.state}. Nothing to upload.`);
-      return { result: 'skipped', state: submitted.state };
+    const submittedState = submitted?.state ?? 'unknown';
+    if (SETTLED_STATES.has(submittedState)) {
+      log(`Version ${version} is already ${submittedState}. Nothing to upload.`);
+      return { result: 'skipped', state: submittedState };
     }
     throw new ActionError(
-      `Version ${version} is ${submitted.state} in the Chrome Web Store.`,
+      `Version ${version} is ${submittedState} in the Chrome Web Store.`,
       'Resubmit it from the Developer Dashboard, or fix the cause and release a new version.',
     );
   }
@@ -128,33 +193,34 @@ export async function publishToStore({
     );
   }
 
-  async function waitWhileProcessing(first, label) {
+  async function waitWhileProcessing(first: { state: string | undefined; body: object }, label: string) {
     const started = Date.now();
     let state = first.state;
-    let last = first.body;
+    let last: object = first.body;
     let failures = 0;
-    for (let attempt = 1; UPLOADING_STATES.has(state) && attempt <= pollAttempts; attempt++) {
+    for (let attempt = 1; UPLOADING_STATES.has(state ?? '') && attempt <= pollAttempts; attempt++) {
       log(`${label} is processing, checking again in ${pollIntervalMs / 1000} s.`);
       await sleep(pollIntervalMs);
       try {
-        last = await fetchStatus();
+        const next = await fetchStatus();
+        last = next;
         failures = 0;
-        state = last.lastAsyncUploadState;
+        state = next.lastAsyncUploadState;
       } catch (error) {
         failures += 1;
-        if (!error.retryable || failures > statusRetries) throw error;
+        if (!(error instanceof ActionError) || !error.retryable || failures > statusRetries) throw error;
         log(`Status check failed, trying again: ${error.message}`);
       }
     }
     return { state, last, seconds: Math.round((Date.now() - started) / 1000) };
   }
 
-  if (UPLOADING_STATES.has(status.lastAsyncUploadState)) {
+  if (UPLOADING_STATES.has(status.lastAsyncUploadState ?? '')) {
     if (dryRun) {
       log('An earlier upload is still processing in the store. A real run would wait for it before uploading.');
     } else {
       const earlier = await waitWhileProcessing({ state: status.lastAsyncUploadState, body: status }, 'An earlier upload');
-      if (UPLOADING_STATES.has(earlier.state)) {
+      if (UPLOADING_STATES.has(earlier.state ?? '')) {
         throw new ActionError(
           `An earlier upload was still processing after ${earlier.seconds} s, so this run uploaded nothing.`,
           'Check the Developer Dashboard, then re-run this job once that upload has finished.',
@@ -168,7 +234,7 @@ export async function publishToStore({
     return { result: 'dry-run', state: '' };
   }
 
-  const upload = await call('POST', `/upload/v2/${item}:upload`, { body: zip, timeoutMs: uploadTimeoutMs });
+  const upload = await call<UploadResponse>('POST', `/upload/v2/${item}:upload`, { body: zip, timeoutMs: uploadTimeoutMs });
   if (upload.uploadState === 'SUCCEEDED' && typeof upload.crxVersion === 'string' && upload.crxVersion !== version) {
     throw new ActionError(
       `The store accepted a package with version ${upload.crxVersion}, not ${version}. This run did not submit it.`,
@@ -176,7 +242,7 @@ export async function publishToStore({
     );
   }
   const { state, last, seconds } = await waitWhileProcessing({ state: upload.uploadState, body: upload }, 'Upload');
-  if (UPLOADING_STATES.has(state)) {
+  if (UPLOADING_STATES.has(state ?? '')) {
     throw new ActionError(
       `The store was still processing version ${version} after ${seconds} s. This run did not submit it.`,
       'The store may still finish processing it as a draft, or the upload may fail. Check the Developer Dashboard, then submit the draft there or re-run this job.',
@@ -188,7 +254,7 @@ export async function publishToStore({
   log(`Uploaded version ${version}.`);
   if (!submit) return { result: 'uploaded', state: '' };
 
-  const publish = await call('POST', `/v2/${item}:publish`, {
+  const publish = await call<PublishResponse>('POST', `/v2/${item}:publish`, {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ publishType }),
     hint: PUBLISH_HINT,
@@ -198,20 +264,21 @@ export async function publishToStore({
   if (Array.isArray(warnings)) {
     for (const warning of warnings.slice(0, 20)) {
       const reason = typeof warning?.reason === 'string' ? ` ${warning.reason}` : '';
-      warn(`Chrome Web Store warning${reason}: ${warning?.description ?? JSON.stringify(warning)}`.slice(0, 2000));
+      const description = typeof warning?.description === 'string' ? warning.description : JSON.stringify(warning);
+      warn(`Chrome Web Store warning${reason}: ${description}`.slice(0, 2000));
     }
   }
 
-  let after;
+  let after: ItemStatus;
   try {
     after = await fetchStatus();
   } catch (error) {
-    warn(`The submission went through, but reading the store status afterwards failed: ${error.message}`);
+    warn(`The submission went through, but reading the store status afterwards failed: ${(error as Error).message}`);
     return { result: 'submitted', state: publish.state ?? '' };
   }
   const inReview = versionsOf(after.submittedItemRevisionStatus);
   const reviewState = after.submittedItemRevisionStatus?.state;
-  if (inReview.length > 0 && !inReview.includes(version) && REVIEW_STATES.has(reviewState)) {
+  if (inReview.length > 0 && !inReview.includes(version) && REVIEW_STATES.has(reviewState ?? '')) {
     throw new ActionError(
       `The store has version ${inReview.join(', ')} in review, not ${version}. Another run replaced the uploaded package before this run submitted it.`,
       'Let one run publish at a time, for example with a concurrency group on the job, then release again.',
@@ -220,6 +287,6 @@ export async function publishToStore({
   return { result: 'submitted', state: (inReview.includes(version) && reviewState) || publish.state || '' };
 }
 
-function versionsOf(revision) {
-  return (revision?.distributionChannels ?? []).map((channel) => channel.crxVersion).filter((version) => typeof version === 'string');
+function versionsOf(revision: RevisionStatus | undefined): string[] {
+  return (revision?.distributionChannels ?? []).map((channel) => channel?.crxVersion).filter((version): version is string => typeof version === 'string');
 }

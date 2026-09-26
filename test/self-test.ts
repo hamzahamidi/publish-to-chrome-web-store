@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { appendFileSync, existsSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { extensionZip, FETCH, PUBLISH, startMockStore, storeStatus, UPLOAD } from './helpers.mjs';
+import { extensionZip, FETCH, PUBLISH, type RecordedRequest, startMockStore, storeStatus, UPLOAD } from './helpers.ts';
 
 const ZIP = 'self-test.zip';
 const REQUESTS = 'self-test-requests.json';
@@ -22,7 +22,7 @@ if (command === 'start') {
     process.exit(1);
   }
   const base = `http://127.0.0.1:${readFileSync(PORT, 'utf8')}`;
-  appendFileSync(process.env.GITHUB_ENV, `CWS_API_BASE=${base}\n`);
+  appendFileSync(process.env.GITHUB_ENV ?? '/dev/stdout', `CWS_API_BASE=${base}\n`);
   console.log(`Mock store listening on ${base}.`);
 } else if (command === 'serve') {
   writeFileSync(ZIP, extensionZip(VERSION));
@@ -37,16 +37,16 @@ if (command === 'start') {
     { result: process.env.RESULT, state: process.env.STATE, version: process.env.VERSION },
     { result: 'submitted', state: 'PENDING_REVIEW', version: VERSION },
   );
-  const requests = JSON.parse(readFileSync(REQUESTS, 'utf8'));
+  const requests = JSON.parse(readFileSync(REQUESTS, 'utf8')) as RecordedRequest[];
   assert.deepEqual(
     requests.map((request) => request.key),
     [FETCH, UPLOAD, PUBLISH, FETCH],
   );
   assert.ok(requests.every((request) => request.auth === 'Bearer self-test-token'));
-  assert.equal(requests[1].size, readFileSync(ZIP).length);
-  assert.deepEqual(JSON.parse(requests[2].body), { publishType: 'DEFAULT_PUBLISH' });
+  assert.equal(requests[1]!.size, readFileSync(ZIP).length);
+  assert.deepEqual(JSON.parse(requests[2]!.body), { publishType: 'DEFAULT_PUBLISH' });
   console.log('The action made the expected four calls and set the expected outputs.');
 } else {
-  console.error('Usage: node test/self-test.mjs start|serve|verify');
+  console.error('Usage: node test/self-test.ts start|serve|verify');
   process.exit(2);
 }
