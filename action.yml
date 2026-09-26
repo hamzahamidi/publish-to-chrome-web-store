@@ -46,7 +46,6 @@ inputs:
     description: Set to true, with deploy-percentage and no zip or crx, to raise the rollout of the newest published version without uploading anything.
     required: false
     default: 'false'
-    required: false
   skip-review:
     description: Ask the store to publish without review. The store refuses the submission when the change needs review, and the run fails with the package left as a draft. Needs publish true.
     required: false
