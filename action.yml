@@ -51,4 +51,4 @@ outputs:
 
 runs:
   using: node24
-  main: src/main.mjs
+  main: src/main.ts

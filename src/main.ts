@@ -1,18 +1,18 @@
 import { readFileSync, statSync } from 'node:fs';
-import { ActionError } from './errors.mjs';
-import { error, getBooleanInput, getInput, info, mask, setOutput, warning } from './runner.mjs';
-import { publishToStore, STORE_API } from './store.mjs';
-import { exchangeRefreshToken, TOKEN_ENDPOINT } from './token.mjs';
-import { readManifest } from './zip.mjs';
+import { ActionError } from './errors.ts';
+import { error, getBooleanInput, getInput, info, mask, setOutput, warning } from './runner.ts';
+import { type PublishType, publishToStore, STORE_API } from './store.ts';
+import { exchangeRefreshToken, TOKEN_ENDPOINT } from './token.ts';
+import { readManifest } from './zip.ts';
 
-const PUBLISH_TYPES = { default: 'DEFAULT_PUBLISH', staged: 'STAGED_PUBLISH' };
+const PUBLISH_TYPES: Record<string, PublishType> = { default: 'DEFAULT_PUBLISH', staged: 'STAGED_PUBLISH' };
 const ITEM_ID = /^[a-p]{32}$/;
 const PUBLISHER_ID = /^[A-Za-z0-9_-]{1,128}$/;
 const HEADER_SAFE = /^[\x21-\x7e]+$/;
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]']);
 const MAX_PACKAGE_BYTES = 2 * 1024 ** 3;
 
-async function main() {
+async function main(): Promise<void> {
   const accessToken = getInput('access-token');
   const clientId = getInput('client-id');
   const clientSecret = getInput('client-secret');
@@ -36,7 +36,7 @@ async function main() {
   if (!ITEM_ID.test(itemId)) throw new ActionError('Input item-id must be the 32 letter extension ID shown in the Developer Dashboard.');
   if (!publishType) throw new ActionError(`Input publish-type must be default or staged, got ${JSON.stringify(publishTypeInput)}.`);
 
-  const refreshInputs = { 'client-id': clientId, 'client-secret': clientSecret, 'refresh-token': refreshToken };
+  const refreshInputs: Record<string, string> = { 'client-id': clientId, 'client-secret': clientSecret, 'refresh-token': refreshToken };
   const given = Object.keys(refreshInputs).filter((name) => refreshInputs[name]);
   if (accessToken && given.length > 0) {
     throw new ActionError(`Pass either access-token or the client-id, client-secret and refresh-token trio, not both (got access-token and ${given.join(', ')}).`);
@@ -53,14 +53,15 @@ async function main() {
     throw new ActionError('Input access-token contains spaces or control characters. Pass the access_token output of google-github-actions/auth, not a JSON key.');
   }
 
-  let zip;
+  let zip: Buffer;
   try {
     const { size } = statSync(zipPath);
     if (size > MAX_PACKAGE_BYTES) throw new ActionError(`${JSON.stringify(zipPath)} is larger than 2 GB, the largest package the Chrome Web Store accepts.`);
     zip = readFileSync(zipPath);
   } catch (cause) {
     if (cause instanceof ActionError) throw cause;
-    throw new ActionError(`Cannot read ${JSON.stringify(zipPath)}: ${cause.code === 'ENOENT' ? 'no such file' : cause.message}.`);
+    const { code, message } = cause as NodeJS.ErrnoException;
+    throw new ActionError(`Cannot read ${JSON.stringify(zipPath)}: ${code === 'ENOENT' ? 'no such file' : message}.`);
   }
   const { version } = readManifest(zip, JSON.stringify(zipPath));
 
@@ -91,10 +92,10 @@ async function main() {
   setOutput('state', state);
 }
 
-function testEndpoint(name, fallback) {
+function testEndpoint(name: string, fallback: string): string {
   const value = process.env[name];
   if (!value) return fallback;
-  let url;
+  let url: URL;
   try {
     url = new URL(value);
   } catch {
@@ -106,8 +107,8 @@ function testEndpoint(name, fallback) {
   return value.replace(/\/+$/, '');
 }
 
-main().catch((cause) => {
+main().catch((cause: unknown) => {
   if (cause instanceof ActionError) error(cause.details ? `${cause.message}\n${cause.details}` : cause.message);
-  else error(`Unexpected failure: ${cause?.stack ?? cause}`);
+  else error(`Unexpected failure: ${(cause as Error | undefined)?.stack ?? cause}`);
   process.exitCode = 1;
 });

@@ -1,9 +1,18 @@
 import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { crc32, deflateRawSync } from 'node:zlib';
 
-export function makeZip(files) {
-  const locals = [];
-  const centrals = [];
+export interface ZipFile {
+  name: string;
+  data: string;
+  method?: number;
+  flags?: number;
+  crc?: number;
+}
+
+export function makeZip(files: ZipFile[]): Buffer {
+  const locals: Buffer[] = [];
+  const centrals: Buffer[] = [];
   let offset = 0;
   for (const file of files) {
     const name = Buffer.from(file.name);
@@ -49,7 +58,7 @@ export function makeZip(files) {
   return Buffer.concat([...locals, directory, end]);
 }
 
-export function extensionZip(version, { method } = {}) {
+export function extensionZip(version: string, { method }: { method?: number } = {}): Buffer {
   return makeZip([
     { name: 'manifest.json', data: JSON.stringify({ manifest_version: 3, name: 'Test extension', version }), method },
     { name: 'background.js', data: 'chrome.runtime.onInstalled.addListener(() => {});\n', method },
@@ -63,8 +72,40 @@ export const FETCH = `GET /v2${ITEM_PATH}:fetchStatus`;
 export const UPLOAD = `POST /upload/v2${ITEM_PATH}:upload`;
 export const PUBLISH = `POST /v2${ITEM_PATH}:publish`;
 
-export function storeStatus({ published, submitted, submittedState = 'PENDING_REVIEW', lastAsyncUploadState, takenDown, warned } = {}) {
-  const channels = (version) => (version ? [{ deployPercentage: 100, crxVersion: version }] : []);
+export interface Reply {
+  status?: number;
+  body?: unknown;
+  headers?: Record<string, string>;
+  partial?: boolean;
+}
+
+export interface RecordedRequest {
+  key: string;
+  auth: string | undefined;
+  contentType: string | undefined;
+  size: number;
+  body: string;
+}
+
+export interface MockStore {
+  base: string;
+  requests: RecordedRequest[];
+  on(key: string, ...replies: Reply[]): void;
+  reset(): void;
+  close(): Promise<void>;
+}
+
+interface StatusOptions {
+  published?: string;
+  submitted?: string;
+  submittedState?: string;
+  lastAsyncUploadState?: string;
+  takenDown?: boolean;
+  warned?: boolean;
+}
+
+export function storeStatus({ published, submitted, submittedState = 'PENDING_REVIEW', lastAsyncUploadState, takenDown, warned }: StatusOptions = {}): Reply {
+  const channels = (version: string | undefined) => (version ? [{ deployPercentage: 100, crxVersion: version }] : []);
   return {
     body: {
       name: ITEM_PATH.slice(1),
@@ -78,41 +119,41 @@ export function storeStatus({ published, submitted, submittedState = 'PENDING_RE
   };
 }
 
-export async function closedPort() {
+export async function closedPort(): Promise<number> {
   const server = createServer();
-  await new Promise((ready) => server.listen(0, '127.0.0.1', ready));
-  const { port } = server.address();
+  await new Promise<void>((ready) => server.listen(0, '127.0.0.1', ready));
+  const { port } = server.address() as AddressInfo;
   await new Promise((done) => server.close(done));
   return port;
 }
 
-export async function startMockStore({ onRequest } = {}) {
-  const routes = new Map();
-  const requests = [];
+export async function startMockStore({ onRequest }: { onRequest?: (request: RecordedRequest, requests: RecordedRequest[]) => void } = {}): Promise<MockStore> {
+  const routes = new Map<string, Reply[]>();
+  const requests: RecordedRequest[] = [];
   const server = createServer((req, res) => {
-    const chunks = [];
+    const chunks: Buffer[] = [];
     req.on('data', (chunk) => chunks.push(chunk));
     req.on('end', () => {
       const payload = Buffer.concat(chunks);
       const key = `${req.method} ${req.url}`;
-      const request = { key, auth: req.headers.authorization, contentType: req.headers['content-type'], size: payload.length, body: payload.toString() };
+      const request: RecordedRequest = { key, auth: req.headers.authorization, contentType: req.headers['content-type'], size: payload.length, body: payload.toString() };
       requests.push(request);
       onRequest?.(request, requests);
       const queue = routes.get(key);
-      const reply = queue ? (queue.length > 1 ? queue.shift() : queue[0]) : { status: 404, body: { error: { code: 404, message: `no mock route for ${key}` } } };
+      const reply: Reply = (queue && (queue.length > 1 ? queue.shift() : queue[0])) ?? { status: 404, body: { error: { code: 404, message: `no mock route for ${key}` } } };
       if (reply.partial) {
         res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': '1000' });
         res.write('{"sta');
-        setTimeout(() => res.socket.destroy(), 20);
+        setTimeout(() => res.socket?.destroy(), 20);
         return;
       }
       res.writeHead(reply.status ?? 200, { 'Content-Type': 'application/json', ...reply.headers });
       res.end(typeof reply.body === 'string' ? reply.body : JSON.stringify(reply.body ?? {}));
     });
   });
-  await new Promise((ready) => server.listen(0, '127.0.0.1', ready));
+  await new Promise<void>((ready) => server.listen(0, '127.0.0.1', ready));
   return {
-    base: `http://127.0.0.1:${server.address().port}`,
+    base: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
     requests,
     on(key, ...replies) {
       routes.set(key, replies);
@@ -121,6 +162,6 @@ export async function startMockStore({ onRequest } = {}) {
       routes.clear();
       requests.length = 0;
     },
-    close: () => new Promise((done) => server.close(done)),
+    close: () => new Promise<void>((done) => server.close(() => done())),
   };
 }

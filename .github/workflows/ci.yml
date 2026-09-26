@@ -24,6 +24,8 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24
+      - run: npm ci
+      - run: npm run typecheck
       - run: npm test
 
   action:
@@ -38,7 +40,7 @@ jobs:
         with:
           node-version: 24
       - name: Start the mock store
-        run: node test/self-test.mjs start
+        run: node test/self-test.ts start
       - id: publish
         uses: ./
         with:
@@ -51,4 +53,4 @@ jobs:
           RESULT: ${{ steps.publish.outputs.result }}
           STATE: ${{ steps.publish.outputs.state }}
           VERSION: ${{ steps.publish.outputs.version }}
-        run: node test/self-test.mjs verify
+        run: node test/self-test.ts verify

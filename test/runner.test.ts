@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { plainLine } from '../src/runner.mjs';
+import { plainLine } from '../src/runner.ts';
 
 describe('plainLine', () => {
   it('keeps an ordinary line as it is', () => {
