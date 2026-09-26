@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { ActionError } from './errors.mjs';
 import { error, getBooleanInput, getInput, info, mask, setOutput, warning } from './runner.mjs';
 import { publishToStore, STORE_API } from './store.mjs';
@@ -10,6 +10,7 @@ const ITEM_ID = /^[a-p]{32}$/;
 const PUBLISHER_ID = /^[A-Za-z0-9_-]{1,128}$/;
 const HEADER_SAFE = /^[\x21-\x7e]+$/;
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]']);
+const MAX_PACKAGE_BYTES = 2 * 1024 ** 3;
 
 async function main() {
   const accessToken = getInput('access-token');
@@ -54,8 +55,11 @@ async function main() {
 
   let zip;
   try {
+    const { size } = statSync(zipPath);
+    if (size > MAX_PACKAGE_BYTES) throw new ActionError(`${JSON.stringify(zipPath)} is larger than 2 GB, the largest package the Chrome Web Store accepts.`);
     zip = readFileSync(zipPath);
   } catch (cause) {
+    if (cause instanceof ActionError) throw cause;
     throw new ActionError(`Cannot read ${JSON.stringify(zipPath)}: ${cause.code === 'ENOENT' ? 'no such file' : cause.message}.`);
   }
   const { version } = readManifest(zip, JSON.stringify(zipPath));

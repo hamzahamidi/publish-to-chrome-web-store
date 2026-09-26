@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, truncateSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { after, afterEach, before, describe, it } from 'node:test';
@@ -187,6 +187,37 @@ describe('action', () => {
       assert.equal(store.requests.length, 0);
     });
   }
+
+  it('refuses a package larger than the store accepts without reading it', { skip: process.platform === 'win32' && 'sparse files' }, async () => {
+    const zip = zipFile('1.0.0', 'huge.zip', Buffer.alloc(0));
+    truncateSync(zip, 2 * 1024 ** 3 + 1);
+    const run = await runAction(baseInputs('1.0.0', { zip }));
+    assert.equal(run.code, 1);
+    assert.match(run.stdout, /is larger than 2 GB, the largest package the Chrome Web Store accepts\./);
+    assert.equal(store.requests.length, 0);
+  });
+
+  it('keeps hostile store text from starting workflow commands', async () => {
+    const hostile = 'bad\n::error::owned\r::add-mask::x %0A \u2028::warning::spoof ##[group]g';
+    store.on(FETCH, {
+      body: {
+        publishedItemRevisionStatus: { state: 'PUBLISHED', distributionChannels: [{ crxVersion: `0.9\n::error::owned` }] },
+      },
+    });
+    store.on(UPLOAD, { body: { uploadState: 'SUCCEEDED' } });
+    store.on(PUBLISH, { body: { state: 'PENDING_REVIEW', warningInfo: { warnings: [{ reason: 'X', description: hostile }] } } });
+    const warned = await runAction(baseInputs('1.0.0'));
+    store.reset();
+    store.on(FETCH, { status: 400, body: { error: { code: 400, message: hostile } } });
+    const failed = await runAction(baseInputs('1.0.0'));
+    for (const run of [warned, failed]) {
+      const lines = run.stdout.split(/\r?\n/);
+      assert.ok(!lines.some((line) => /^[\s\u0085\u2028]*::(error::owned|add-mask::x|warning::spoof)/.test(line)), run.stdout);
+      assert.ok(!lines.some((line) => /^[\s\u0085\u2028]*##\[group\]/.test(line)), run.stdout);
+    }
+    assert.match(warned.stdout, /^::warning::Chrome Web Store warning X: bad%0A::error::owned%0D::add-mask::x %250A/m);
+    assert.match(failed.stdout, /^::error::GET .*fetchStatus returned HTTP 400: bad%0A::error::owned/m);
+  });
 
   it('stops before any request when the ZIP has no manifest at its root', async () => {
     const zip = zipFile('1.0.0', 'nested.zip', makeZip([{ name: 'dist/manifest.json', data: '{"version":"1.0.0"}' }]));
