@@ -5,8 +5,9 @@ A GitHub Action that publishes a Chrome extension from GitHub Actions: it upload
 - **No stored secret needed.** It takes a short-lived access token, which `google-github-actions/auth` can mint through Workload Identity Federation. The store credential never sits in your repository secrets. Verified CRX Uploads, if you opt in, add one secret: the signing key.
 - **Safe to re-run.** It reads the store status before writing anything. A version that is already published or in review is skipped. A version that the store would refuse, or a review in progress for another version, stops the run with a clear message before anything is uploaded.
 - **Approval before each upload.** The recommended setup only lets an approved job in one GitHub environment obtain the token.
-- **Readable, typed, no runtime dependencies.** About 800 lines of TypeScript in `src/` and `sign/`, importing only Node.js built-ins. Node runs those files as they are: no bundle, no `dist/`, no build step, so what you read is what runs.
+- **Readable, typed, no runtime dependencies.** About 900 lines of TypeScript in `src/` and `sign/`, importing only Node.js built-ins. Node runs those files as they are: no bundle, no `dist/`, no build step, so what you read is what runs.
 - **Verified CRX Uploads, if you opt in.** A companion `sign` action signs the ZIP as a CRX3 in a separate job, writing for the same ZIP the same bytes as Chrome's packer, and this action uploads it. The signing key and the store token never meet in one job.
+- **Partial rollouts.** `deploy-percentage` releases a version to a share of users and raises that share later, for items large enough that Google allows it.
 - **Testable without risk.** `dry-run: true` checks your ZIP, that your credentials can read the item, and the store state, then stops before uploading.
 - **Existing setups work too.** It also accepts an OAuth client ID, client secret and refresh token.
 
@@ -141,6 +142,26 @@ Add `dry-run: true` to the publish step of any setup above (the `sign` action ha
 
 The status request also accepts a read-only token, so a dry run proves that the credentials can read the item. Write access is first used by the upload, and the store checks a CRX signature only then.
 
+### Partial rollout
+
+Google lets the API set a rollout percentage only for items with more than 10,000 seven-day active users, and the percentage can only go up. For a smaller item the store refuses the request, and the action shows Google's message with that rule.
+
+To submit a version to 10% of users, add the input to the publish step:
+
+```yaml
+- uses: hamzahamidi/publish-to-chrome-web-store@v1
+  with:
+    access-token: ${{ steps.auth.outputs.access_token }}
+    publisher-id: your-publisher-id
+    item-id: your-32-letter-extension-id
+    zip: extension.zip
+    deploy-percentage: 10
+```
+
+To raise the published version to 50% later, run the step again with `deploy-percentage: 50` and without `zip` or `crx`. The action reads which version is published and raises it. A run that gives a ZIP of a version already published raises that version instead of skipping it. When the store already reports the percentage or more, nothing is sent and `result` is `skipped`, so a re-run is safe. `dry-run: true` reports the change without sending it.
+
+`skip-review: true` asks the store to skip review, which it grants only when the change qualifies, and otherwise sends the version to review as usual. `block-on-warnings: true` makes the store refuse the submission when it has warnings, and the action shows the warnings the store returns.
+
 ### With an OAuth refresh token
 
 ```yaml
@@ -170,15 +191,18 @@ A service account key also works. Grant the service account `roles/iam.serviceAc
 | `crx` | one of `zip` or `crx` | | Path to a CRX3 you signed, for an item opted in to Verified CRX Uploads. Uploaded as is |
 | `publish` | no | `true` | `false` uploads the package as a draft without submitting it |
 | `dry-run` | no | `false` | `true` stops after the status check and reports what would happen |
+| `deploy-percentage` | no | | Share of users, 0 to 100, who get the version. See [Partial rollout](#partial-rollout) |
+| `skip-review` | no | `false` | `true` asks the store to skip review. It does so only when the change qualifies |
+| `block-on-warnings` | no | `false` | `true` makes the store refuse the submission when it has warnings |
 | `publish-type` | no | `default` | `default` makes the version live once it passes review. `staged` holds the approved version until you publish it in the dashboard or with a separate publish call to the API. You have 30 days after approval, then it reverts to a draft and needs a new review. This action does not publish a staged version, even when re-run |
 
 ## Outputs
 
 | Output | Description |
 | --- | --- |
-| `result` | `submitted`, `uploaded` (when `publish` is `false`), `skipped` (this version was already in the store) or `dry-run` (a dry run that would upload) |
-| `state` | Store state of this version at the end, such as `PENDING_REVIEW`, `STAGED` or `PUBLISHED`. Empty when `result` is `uploaded` or `dry-run`, or when the store reports no state after submitting |
-| `version` | The version read from `manifest.json` in the ZIP |
+| `result` | `submitted`, `uploaded` (when `publish` is `false`), `skipped` (this version was already in the store, or its rollout already reached `deploy-percentage`), `raised` (the rollout of the published version went up) or `dry-run` (a dry run that would upload or raise) |
+| `state` | Store state of this version at the end, such as `PENDING_REVIEW`, `STAGED` or `PUBLISHED`. Empty when `result` is `uploaded`, or `dry-run` for an upload, or when the store reports no state after submitting |
+| `version` | The version read from `manifest.json` in the ZIP, or the published version the run raised when no package is given |
 
 ## What it does
 
@@ -187,6 +211,7 @@ A service account key also works. Grant the service account `roles/iam.serviceAc
 
    | Store state | What the action does |
    | --- | --- |
+   | This version is published and `deploy-percentage` is higher than its rollout | Raises the rollout and stops. `result` is `raised` |
    | This version is published, in review, approved or published to testers | Nothing. `result` is `skipped` and the step succeeds |
    | This version was rejected or its review was cancelled | Fails. Resubmit it from the dashboard or release a new version |
    | The published version is equal or higher | Fails without uploading, because the store only accepts a higher version |
@@ -198,7 +223,9 @@ A service account key also works. Grant the service account `roles/iam.serviceAc
 
 3. Stops here on a dry run.
 4. Waits first if an earlier upload is still processing. Then uploads the package, the ZIP or the CRX as is, stops if the store reports a different version for it, and checks the status every 10 seconds, up to 30 times, while the store processes it. A check that fails with a network error or HTTP 429, 500, 502, 503 or 504 counts as one of the 30, and three such failures in a row end the run. If processing takes longer, the run fails without submitting. The store may still finish the package as a draft, or the upload may fail, so check the dashboard before re-running.
-5. Submits the version for review, unless `publish` is `false`. Warnings the store returns appear as warning annotations.
+5. Submits the version for review, unless `publish` is `false`, with `deploy-percentage`, `skip-review` and `block-on-warnings` when given. Warnings the store returns appear as warning annotations.
+
+Without `zip` or `crx`, the action only fetches the status and raises the rollout of the newest published version to `deploy-percentage`.
 6. Reads the status once more. If a different version is now in review, another writer replaced the package before this run submitted it. The run fails to report that, but the other package is already submitted.
 
 Store errors are reported with the HTTP status, the store's message and a hint for the common causes.
@@ -295,7 +322,8 @@ If you release from a branch instead of tags, replace `assertion.ref_type == 'ta
 | Always | `GET https://chromewebstore.googleapis.com/v2/publishers/{publisher-id}/items/{item-id}:fetchStatus` |
 | Unless skipped, refused or a dry run | `POST https://chromewebstore.googleapis.com/upload/v2/publishers/{publisher-id}/items/{item-id}:upload` with the ZIP, or with the CRX plus the `X-Goog-Upload-Protocol: raw` and `X-Goog-Upload-File-Name` headers Google documents for it |
 | While an earlier upload or this one is processing | `GET ...:fetchStatus` again, every 10 seconds, up to 30 times |
-| After a successful upload, unless `publish` is `false` | `POST https://chromewebstore.googleapis.com/v2/publishers/{publisher-id}/items/{item-id}:publish` with `{"publishType": ...}` |
+| After a successful upload, unless `publish` is `false` | `POST https://chromewebstore.googleapis.com/v2/publishers/{publisher-id}/items/{item-id}:publish` with `{"publishType": ...}`, plus `deployInfos`, `skipReview` and `blockOnWarnings` when their inputs are set |
+| When `deploy-percentage` raises a published version, unless a dry run | `POST https://chromewebstore.googleapis.com/v2/publishers/{publisher-id}/items/{item-id}:setPublishedDeployPercentage` with `{"deployPercentage": ...}` |
 | After submitting | `GET ...:fetchStatus` once, to confirm which version is in review |
 
 The hosts are fixed in the code. There is no input to change them, redirects are refused rather than followed, and the test settings described under [Development](#development) only accept loopback addresses. `publisher-id` and `item-id` are validated before they are placed in a URL.
@@ -311,8 +339,8 @@ The hosts are fixed in the code. There is no input to change them, redirects are
 
 | File | Lines | Role |
 | --- | --- | --- |
-| [`src/main.ts`](src/main.ts) | ~130 | Reads and validates inputs, masks secrets, sets outputs |
-| [`src/store.ts`](src/store.ts) | ~310 | The store calls, their response types and the state decisions |
+| [`src/main.ts`](src/main.ts) | ~150 | Reads and validates inputs, masks secrets, sets outputs |
+| [`src/store.ts`](src/store.ts) | ~400 | The store calls, their response types and the state decisions |
 | [`src/zip.ts`](src/zip.ts) | ~130 | Reads `manifest.json` from the ZIP, with checksum verification |
 | [`src/token.ts`](src/token.ts) | ~50 | Refresh token exchange |
 | [`src/runner.ts`](src/runner.ts) | ~50 | GitHub Actions inputs, outputs, masking and annotations |
@@ -338,7 +366,8 @@ Report a vulnerability as described in [SECURITY.md](SECURITY.md).
 - One service account per publisher, shared by all its extensions.
 - The CRX upload follows Google's documented headers, and for the same ZIP `sign` writes the same bytes as Chrome's packer, but the CRX path has not yet uploaded to a live opted-in item.
 - Packages up to 2 GB, the store's limit. The upload request has 10 minutes to finish. ZIP64 archives are not supported.
-- Partial rollout (`deployPercentage`), skipping review and `blockOnWarnings` are not exposed.
+- A rollout percentage can only be set for items with more than 10,000 seven-day active users, and only upward. That is Google's rule, and the API has no call to lower it.
+- Cancelling a pending review is not exposed. Cancel it in the dashboard.
 
 ## FAQ
 

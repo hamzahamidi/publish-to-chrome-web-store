@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { after, afterEach, before, describe, it } from 'node:test';
 import { ActionError } from '../src/errors.ts';
-import { type PublishOptions, type PublishResult, publishToStore } from '../src/store.ts';
-import { closedPort, extensionZip, FETCH, ITEM, type MockStore, PUBLISH, PUBLISHER, startMockStore, storeStatus, UPLOAD } from './helpers.ts';
+import { type PublishOptions, type PublishResult, publishToStore, raiseRollout } from '../src/store.ts';
+import { closedPort, extensionZip, FETCH, ITEM, type MockStore, PUBLISH, publishedAt, PUBLISHER, ROLLOUT, startMockStore, storeStatus, UPLOAD } from './helpers.ts';
 
 let store: MockStore;
 before(async () => {
@@ -406,6 +406,73 @@ describe('publishToStore', () => {
     store.on(UPLOAD, { body: { uploadState: 'FAILED' } });
     const error = await rejection(publish('1.0.1', { crxFileName: 'ext.crx' }));
     assert.match(error.details ?? '', /^Store response: .*\n.*Package tab\.$/s);
+  });
+
+  it('sends only the publish options that were asked for', async () => {
+    store.on(FETCH, storeStatus());
+    store.on(UPLOAD, { body: { uploadState: 'SUCCEEDED' } });
+    store.on(PUBLISH, { body: { state: 'PENDING_REVIEW' } });
+    await publish('1.0.0', { deployPercentage: 0, blockOnWarnings: true });
+    assert.deepEqual(JSON.parse(store.requests[2]!.body), { publishType: 'DEFAULT_PUBLISH', deployInfos: [{ deployPercentage: 0 }], blockOnWarnings: true });
+  });
+
+  it('shows the details of a submission blocked on warnings', async () => {
+    store.on(FETCH, storeStatus());
+    store.on(UPLOAD, { body: { uploadState: 'SUCCEEDED' } });
+    store.on(PUBLISH, { status: 400, body: { error: { code: 400, message: 'Validation warnings.', details: [{ '@type': 'type.googleapis.com/google.chrome.webstore.v2.Warning', reason: 'BROAD_HOST_PERMISSION', description: 'uses a broad host permission' }] } } });
+    const error = await rejection(publish('1.0.0', { blockOnWarnings: true }));
+    assert.match(error.message, /returned HTTP 400: Validation warnings\. Details: \[.*BROAD_HOST_PERMISSION.*broad host permission/);
+  });
+
+  it('raises the rollout when the version is already published below the target', async () => {
+    store.on(FETCH, publishedAt('1.0.1', 10));
+    store.on(ROLLOUT, { body: {} });
+    const run = publish('1.0.1', { deployPercentage: 40 });
+    assert.deepEqual(await run, { result: 'raised', state: 'PUBLISHED' });
+    assert.deepEqual(calls(), [FETCH, ROLLOUT]);
+    assert.deepEqual(JSON.parse(store.requests[1]!.body), { deployPercentage: 40 });
+  });
+
+  it('leaves a rollout alone when it already reaches the target', async () => {
+    store.on(FETCH, publishedAt('1.0.1', 40));
+    const run = publish('1.0.1', { deployPercentage: 40 });
+    assert.deepEqual(await run, { result: 'skipped', state: 'PUBLISHED' });
+    assert.deepEqual(calls(), [FETCH]);
+    assert.ok(run.lines.includes('Version 1.0.1 already reaches 40% of users. Nothing to raise.'));
+  });
+
+  it('asks the store to raise when it does not report a percentage, and reports a dry run without raising', async () => {
+    store.on(FETCH, publishedAt('1.0.1'));
+    store.on(ROLLOUT, { body: {} });
+    assert.equal((await publish('1.0.1', { deployPercentage: 60 })).result, 'raised');
+    store.reset();
+    store.on(FETCH, publishedAt('1.0.1', 10));
+    const dry = publish('1.0.1', { deployPercentage: 60, dryRun: true });
+    assert.deepEqual(await dry, { result: 'dry-run', state: 'PUBLISHED' });
+    assert.deepEqual(calls(), [FETCH]);
+    assert.ok(dry.lines.includes('Dry run: version 1.0.1 would go from 10% to 60% of users. Nothing was sent to the store.'));
+  });
+
+  it('explains Google\'s rollout rule when the store refuses to raise', async () => {
+    store.on(FETCH, publishedAt('1.0.1', 10));
+    store.on(ROLLOUT, { status: 400, body: { error: { code: 400, message: 'Item is not eligible.' } } });
+    const error = await rejection(publish('1.0.1', { deployPercentage: 50 }));
+    assert.match(error.details ?? '', /more than 10,000 seven-day active users, and only upward/);
+  });
+
+  it('raises the newest published version in raise-only mode, and refuses when nothing is published', async () => {
+    store.on(FETCH, { body: { publishedItemRevisionStatus: { state: 'PUBLISHED', distributionChannels: [{ crxVersion: '1.9.0', deployPercentage: 100 }, { crxVersion: '1.10.0', deployPercentage: 5 }] } } });
+    store.on(ROLLOUT, { body: {} });
+    const lines: string[] = [];
+    const raised = await raiseRollout({ token: 'test-token', publisherId: PUBLISHER, itemId: ITEM, deployPercentage: 25, apiBase: store.base, log: (line) => lines.push(line) });
+    assert.deepEqual(raised, { result: 'raised', state: 'PUBLISHED', version: '1.10.0' });
+    assert.ok(lines.includes('Raised version 1.10.0 from 5% to 25% of users.'));
+    store.reset();
+    store.on(FETCH, storeStatus());
+    await assert.rejects(
+      raiseRollout({ token: 'test-token', publisherId: PUBLISHER, itemId: ITEM, deployPercentage: 25, apiBase: store.base }),
+      (error) => error instanceof ActionError && /No version of this item is published/.test(error.message),
+    );
   });
 
   it('passes store warnings on', async () => {

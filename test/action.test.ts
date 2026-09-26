@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, truncateSync, writeFileSync } from '
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { after, afterEach, before, describe, it } from 'node:test';
-import { closedPort, extensionZip, FETCH, ITEM, makeCrx, makeZip, type MockStore, PUBLISH, PUBLISHER, startMockStore, storeStatus, UPLOAD } from './helpers.ts';
+import { closedPort, extensionZip, FETCH, ITEM, makeCrx, makeZip, type MockStore, PUBLISH, publishedAt, PUBLISHER, ROLLOUT, startMockStore, storeStatus, UPLOAD } from './helpers.ts';
 
 const MAIN = resolve(import.meta.dirname, '../src/main.ts');
 const TOKEN = 'ya29.test-access-token';
@@ -120,6 +120,32 @@ describe('action', () => {
     assert.equal(store.requests.length, 0);
   });
 
+  it('raises the rollout of the published version when given deploy-percentage alone', async () => {
+    store.on(FETCH, publishedAt('2.0.0', 10));
+    store.on(ROLLOUT, { body: {} });
+    const inputs = baseInputs('1.0.0', { 'deploy-percentage': '50' });
+    delete inputs.zip;
+    const run = await runAction(inputs);
+    assert.equal(run.code, 0, run.stdout);
+    assert.deepEqual(run.outputs, { version: '2.0.0', result: 'raised', state: 'PUBLISHED' });
+    assert.deepEqual(
+      store.requests.map((request) => request.key),
+      [FETCH, ROLLOUT],
+    );
+    assert.deepEqual(JSON.parse(store.requests[1]!.body), { deployPercentage: 50 });
+    assert.match(run.stdout, /^Raised version 2\.0\.0 from 10% to 50% of users\.$/m);
+  });
+
+  it('passes deploy-percentage, skip-review and block-on-warnings to the submission', async () => {
+    store.on(FETCH, storeStatus({ published: '1.0.0' }));
+    store.on(UPLOAD, { body: { uploadState: 'SUCCEEDED' } });
+    store.on(PUBLISH, { body: { state: 'PUBLISHED' } });
+    const run = await runAction(baseInputs('1.0.1', { 'deploy-percentage': '20', 'skip-review': 'true', 'block-on-warnings': 'true' }));
+    assert.equal(run.code, 0, run.stdout);
+    assert.deepEqual(JSON.parse(store.requests[2]!.body), { publishType: 'DEFAULT_PUBLISH', deployInfos: [{ deployPercentage: 20 }], skipReview: true, blockOnWarnings: true });
+    assert.match(run.stdout, /Submitted version 1\.0\.1 asking to skip review to 20% of users\. Store state: PUBLISHED\./);
+  });
+
   it('reports a skipped run with the store state', async () => {
     store.on(FETCH, storeStatus({ published: '1.0.0', submitted: '1.0.1' }));
     const run = await runAction(baseInputs('1.0.1'));
@@ -220,7 +246,11 @@ describe('action', () => {
     ['an unknown publish-type', { 'publish-type': 'now' }, /publish-type must be default or staged, got "now"/],
     ['a publish value that is not boolean', { publish: 'yes' }, /Input publish must be true or false, got "yes"/],
     ['a missing ZIP', { zip: 'nope/ext.zip' }, /Cannot read "nope\/ext\.zip": no such file\./],
-    ['no package', { zip: '' }, /Input zip is required, or crx for an item opted in to Verified CRX Uploads\./],
+    ['no package', { zip: '' }, /Input zip is required, or crx for an item opted in to Verified CRX Uploads, or deploy-percentage alone/],
+    ['a deploy-percentage that is not a number', { 'deploy-percentage': 'half' }, /deploy-percentage must be a whole number from 0 to 100, got "half"/],
+    ['a deploy-percentage above 100', { 'deploy-percentage': '101' }, /deploy-percentage must be a whole number from 0 to 100, got "101"/],
+    ['a negative deploy-percentage', { 'deploy-percentage': '-5' }, /deploy-percentage must be a whole number from 0 to 100, got "-5"/],
+    ['a skip-review that is not boolean', { 'skip-review': 'maybe' }, /Input skip-review must be true or false/],
     ['both package kinds', { crx: 'ext.crx' }, /Pass either zip or crx, not both\./],
   ];
   for (const [label, override, pattern] of invalid) {
