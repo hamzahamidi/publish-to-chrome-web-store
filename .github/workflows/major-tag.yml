@@ -1,0 +1,31 @@
+name: Move major tag
+
+on:
+  release:
+    types: [released]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: move-major-tag
+  cancel-in-progress: false
+
+jobs:
+  major-tag:
+    name: Point the major tag at this release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/move-major-tag.mjs
+          sparse-checkout-cone-mode: false
+      - name: Move the tag
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/move-major-tag.mjs

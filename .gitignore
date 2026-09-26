@@ -1,0 +1,3 @@
+node_modules/
+/self-test*
+.DS_Store

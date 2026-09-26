@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: npm test
+
+  action:
+    name: Action against a mock store
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Start the mock store
+        run: node test/self-test.mjs start
+      - id: publish
+        uses: ./
+        with:
+          access-token: self-test-token
+          publisher-id: pub-1
+          item-id: abcdefghijklmnopabcdefghijklmnop
+          zip: self-test.zip
+      - name: Check the calls and outputs
+        env:
+          RESULT: ${{ steps.publish.outputs.result }}
+          STATE: ${{ steps.publish.outputs.state }}
+          VERSION: ${{ steps.publish.outputs.version }}
+        run: node test/self-test.mjs verify

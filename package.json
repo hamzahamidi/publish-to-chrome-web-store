@@ -1,0 +1,11 @@
+{
+  "name": "publish-to-chrome-web-store",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node --test --experimental-test-coverage --test-coverage-lines=95 --test-coverage-branches=85 --test-coverage-functions=85 \"test/*.test.mjs\""
+  }
+}

@@ -1,0 +1,54 @@
+name: Publish to Chrome Web Store
+description: Upload a Chrome extension ZIP and submit it for review with the Chrome Web Store API v2. No dependencies.
+author: Hamza Hamidi
+
+branding:
+  icon: upload-cloud
+  color: green
+
+inputs:
+  access-token:
+    description: OAuth 2.0 access token with the https://www.googleapis.com/auth/chromewebstore scope, such as the access_token output of google-github-actions/auth. Use this or the refresh token inputs.
+    required: false
+  client-id:
+    description: OAuth client ID, for the refresh token flow.
+    required: false
+  client-secret:
+    description: OAuth client secret, for the refresh token flow.
+    required: false
+  refresh-token:
+    description: OAuth refresh token with the chromewebstore scope, for the refresh token flow.
+    required: false
+  publisher-id:
+    description: Publisher ID, shown on the Account page of the Chrome Web Store Developer Dashboard.
+    required: true
+  item-id:
+    description: The 32 letter ID of the extension.
+    required: true
+  zip:
+    description: Path to the extension ZIP, with manifest.json at its root.
+    required: true
+  publish:
+    description: Submit the uploaded version for review. Set to false to upload a draft only.
+    required: false
+    default: 'true'
+  dry-run:
+    description: Check the ZIP, that the credentials can read the item, and the store state, then report what would happen without uploading anything.
+    required: false
+    default: 'false'
+  publish-type:
+    description: default makes the version live once it passes review. staged holds the approved version for up to 30 days until you publish it in the dashboard or through the API (this action does not), then it reverts to a draft.
+    required: false
+    default: default
+
+outputs:
+  result:
+    description: submitted, uploaded (publish was false), skipped (this version was already in the store) or dry-run (a dry run that would upload).
+  state:
+    description: Store state of this version when the action finished, such as PENDING_REVIEW, STAGED or PUBLISHED. Empty when result is uploaded or dry-run, or when the store reports no state after submitting.
+  version:
+    description: Version read from manifest.json in the ZIP.
+
+runs:
+  using: node24
+  main: src/main.mjs
