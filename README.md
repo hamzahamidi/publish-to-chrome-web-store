@@ -381,7 +381,6 @@ What this action does not do:
 
 - It does not publish a staged version or cancel a pending review. Do both in the dashboard.
 - It refuses ZIP64 archives, and gives the upload request 10 minutes to finish.
-- The CRX upload follows Google's documented headers, and for the same ZIP `sign` writes the same bytes as Chrome's packer, but the CRX path has not yet uploaded to a live opted-in item.
 
 What the Chrome Web Store imposes on any publishing tool:
 
