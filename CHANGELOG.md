@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.2
+
+- The publish and sign actions refuse a `zip` or `crx` path that is not a regular file, such as a named pipe or a device, before reading it.
+- The README adds a migration path from PlasmoHQ/bpp, names the Firefox and Edge sibling actions, and shows CI, CodeQL and coverage badges. llms.txt follows.
+- Workflow actions are pinned to commit SHAs, coverage goes to Codecov through OIDC, and OpenSSF Scorecard runs weekly.
+
 ## 1.2.1
 
 - The Marketplace description and the README opening lead with publishing through a short-lived token, and the README starts with a quick start and a short comparison.
