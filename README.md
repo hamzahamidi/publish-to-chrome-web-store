@@ -377,12 +377,18 @@ Report a vulnerability as described in [SECURITY.md](SECURITY.md).
 
 ## Limits
 
+What this action does not do:
+
+- It does not publish a staged version or cancel a pending review. Do both in the dashboard.
+- It refuses ZIP64 archives, and gives the upload request 10 minutes to finish.
+- The CRX upload follows Google's documented headers, and for the same ZIP `sign` writes the same bytes as Chrome's packer, but the CRX path has not yet uploaded to a live opted-in item.
+
+What the Chrome Web Store imposes on any publishing tool:
+
 - The API cannot create an item or change its visibility. After you change visibility in the dashboard, publish once by hand with the new visibility: until then the API cannot publish ([Google's note](https://developer.chrome.com/docs/webstore/using-api)).
 - One service account per publisher, shared by all its extensions.
-- The CRX upload follows Google's documented headers, and for the same ZIP `sign` writes the same bytes as Chrome's packer, but the CRX path has not yet uploaded to a live opted-in item.
-- Packages up to 2 GB, the store's limit. The upload request has 10 minutes to finish. ZIP64 archives are not supported.
-- A rollout percentage can only be set for items with more than 10,000 seven-day active users, and only upward. That is Google's rule, and the API has no call to lower it.
-- Cancelling a pending review is not exposed. Cancel it in the dashboard.
+- Packages up to 2 GB.
+- A rollout percentage can only be set for items with more than 10,000 seven-day active users, and only upward. The API has no call to lower it.
 
 ## FAQ
 
