@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.0
+
+- Optional support for Verified CRX Uploads. The new `crx` input uploads a CRX3 with the `X-Goog-Upload-Protocol: raw` and `X-Goog-Upload-File-Name` headers Google documents, and reads the version from the ZIP inside it. `zip` works as before.
+- A companion action, `hamzahamidi/publish-to-chrome-web-store/sign@v1`, signs a ZIP as a CRX3 with an RSA key, writing the same bytes Chrome's `--pack-extension` writes around the same ZIP. It is meant for a job in its own environment that holds no store token.
+- A ZIP refused with `PKG_MUST_UPDATE_AS_CRX` now points to the `crx` input, and a refused CRX points to the opt-in and the registered key.
+
 ## 1.0.0
 
 First release.

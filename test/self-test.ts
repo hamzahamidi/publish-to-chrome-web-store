@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { generateKeyPairSync, randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { extensionZip, FETCH, PUBLISH, type RecordedRequest, startMockStore, storeStatus, UPLOAD } from './helpers.ts';
@@ -11,7 +12,7 @@ const VERSION = '1.2.3';
 
 const command = process.argv[2];
 
-if (command === 'start') {
+if (command === 'start' || command === 'start-crx') {
   rmSync(PORT, { force: true });
   const log = openSync('self-test-server.log', 'w');
   spawn(process.execPath, [import.meta.filename, 'serve'], { detached: true, stdio: ['ignore', log, log] }).unref();
@@ -22,7 +23,14 @@ if (command === 'start') {
     process.exit(1);
   }
   const base = `http://127.0.0.1:${readFileSync(PORT, 'utf8')}`;
-  appendFileSync(process.env.GITHUB_ENV ?? '/dev/stdout', `CWS_API_BASE=${base}\n`);
+  const env = process.env.GITHUB_ENV ?? '/dev/stdout';
+  appendFileSync(env, `CWS_API_BASE=${base}\n`);
+  if (command === 'start-crx') {
+    const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048, privateKeyEncoding: { type: 'pkcs8', format: 'pem' }, publicKeyEncoding: { type: 'spki', format: 'pem' } });
+    for (const line of privateKey.trim().split('\n')) console.log(`::add-mask::${line}`);
+    const delimiter = `EOF_${randomUUID()}`;
+    appendFileSync(env, `SELF_TEST_KEY<<${delimiter}\n${privateKey.trim()}\n${delimiter}\n`);
+  }
   console.log(`Mock store listening on ${base}.`);
 } else if (command === 'serve') {
   writeFileSync(ZIP, extensionZip(VERSION));
@@ -32,7 +40,7 @@ if (command === 'start') {
   store.on(PUBLISH, { body: { state: 'PENDING_REVIEW' } });
   writeFileSync(`${PORT}.tmp`, new URL(store.base).port);
   renameSync(`${PORT}.tmp`, PORT);
-} else if (command === 'verify') {
+} else if (command === 'verify' || command === 'verify-crx') {
   assert.deepEqual(
     { result: process.env.RESULT, state: process.env.STATE, version: process.env.VERSION },
     { result: 'submitted', state: 'PENDING_REVIEW', version: VERSION },
@@ -43,10 +51,17 @@ if (command === 'start') {
     [FETCH, UPLOAD, PUBLISH, FETCH],
   );
   assert.ok(requests.every((request) => request.auth === 'Bearer self-test-token'));
-  assert.equal(requests[1]!.size, readFileSync(ZIP).length);
+  if (command === 'verify-crx') {
+    assert.equal(requests[1]!.size, readFileSync('self-test.crx').length);
+    assert.equal(requests[1]!.uploadProtocol, 'raw');
+    assert.equal(requests[1]!.uploadFileName, 'self-test.crx');
+  } else {
+    assert.equal(requests[1]!.size, readFileSync(ZIP).length);
+    assert.equal(requests[1]!.uploadProtocol, undefined);
+  }
   assert.deepEqual(JSON.parse(requests[2]!.body), { publishType: 'DEFAULT_PUBLISH' });
   console.log('The action made the expected four calls and set the expected outputs.');
 } else {
-  console.error('Usage: node test/self-test.ts start|serve|verify');
+  console.error('Usage: node test/self-test.ts start|start-crx|serve|verify|verify-crx');
   process.exit(2);
 }

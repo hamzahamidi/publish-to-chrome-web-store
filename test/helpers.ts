@@ -65,6 +65,14 @@ export function extensionZip(version: string, { method }: { method?: number } = 
   ]);
 }
 
+export function makeCrx(archive: Buffer, { version = 3, header = Buffer.from('signed header bytes') }: { version?: number; header?: Buffer } = {}): Buffer {
+  const prefix = Buffer.alloc(12);
+  prefix.write('Cr24', 0, 'latin1');
+  prefix.writeUInt32LE(version, 4);
+  prefix.writeUInt32LE(header.length, 8);
+  return Buffer.concat([prefix, header, archive]);
+}
+
 export const PUBLISHER = 'pub-1';
 export const ITEM = 'abcdefghijklmnopabcdefghijklmnop';
 export const ITEM_PATH = `/publishers/${PUBLISHER}/items/${ITEM}`;
@@ -83,6 +91,8 @@ export interface RecordedRequest {
   key: string;
   auth: string | undefined;
   contentType: string | undefined;
+  uploadProtocol: string | undefined;
+  uploadFileName: string | undefined;
   size: number;
   body: string;
 }
@@ -136,7 +146,15 @@ export async function startMockStore({ onRequest }: { onRequest?: (request: Reco
     req.on('end', () => {
       const payload = Buffer.concat(chunks);
       const key = `${req.method} ${req.url}`;
-      const request: RecordedRequest = { key, auth: req.headers.authorization, contentType: req.headers['content-type'], size: payload.length, body: payload.toString() };
+      const request: RecordedRequest = {
+        key,
+        auth: req.headers.authorization,
+        contentType: req.headers['content-type'],
+        uploadProtocol: req.headers['x-goog-upload-protocol'] as string | undefined,
+        uploadFileName: req.headers['x-goog-upload-file-name'] as string | undefined,
+        size: payload.length,
+        body: payload.toString(),
+      };
       requests.push(request);
       onRequest?.(request, requests);
       const queue = routes.get(key);

@@ -38,7 +38,7 @@ export function compareVersions(a: string, b: string): number {
 
 export function readManifest(zip: Buffer, label = 'the ZIP'): Manifest {
   if (zip.length >= 4 && zip.toString('latin1', 0, 4) === 'Cr24') {
-    throw new ActionError(`${label} is a CRX package, not a ZIP. This action uploads ZIP packages only, so it cannot publish items opted in to Verified CRX Uploads.`);
+    throw new ActionError(`${label} is a CRX package, not a ZIP.`);
   }
   const entries = centralDirectory(zip, label);
   const matches = entries.filter((entry) => entry.name === 'manifest.json');

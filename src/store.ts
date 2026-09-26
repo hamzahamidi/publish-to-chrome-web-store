@@ -11,6 +11,7 @@ export interface PublishOptions {
   itemId: string;
   version: string;
   zip: Buffer;
+  crxFileName?: string;
   submit?: boolean;
   dryRun?: boolean;
   publishType?: PublishType;
@@ -81,6 +82,9 @@ const STATUS_HINTS: Record<number, string> = {
 const PUBLISH_HINT = 'If the visibility of the item was changed in the Developer Dashboard, publish once by hand with the new visibility. Until then the API cannot publish it.';
 const RERUN_HINT = 'The store may have received the request. Re-running is safe: the action reads the store status first.';
 const REVIEW_STATES = new Set(['PENDING_REVIEW', 'STAGED']);
+const MUST_USE_CRX = /PKG_MUST_UPDATE_AS_CRX|update your item with a crx/i;
+const USE_CRX_HINT = 'This item is opted in to Verified CRX Uploads, so the store only accepts a CRX signed with your key. Pass it through the crx input.';
+const CRX_REFUSED_HINT = 'If the store refused the CRX itself, check that the item is opted in to Verified CRX Uploads and that the CRX is signed with the key registered on its Package tab.';
 
 export async function publishToStore({
   token,
@@ -88,6 +92,7 @@ export async function publishToStore({
   itemId,
   version,
   zip,
+  crxFileName,
   submit = true,
   dryRun = false,
   publishType = 'DEFAULT_PUBLISH',
@@ -142,7 +147,8 @@ export async function publishToStore({
       const detailReason = details.map((detail) => detail?.reason).find((each): each is string => typeof each === 'string');
       const retryable = RETRYABLE_STATUSES.has(response.status);
       const fallback = retryable ? (method === 'POST' ? RERUN_HINT : undefined) : hint;
-      throw new ActionError(`${method} ${path} returned HTTP ${response.status}: ${reason}`, (detailReason && REASON_HINTS[detailReason]) || STATUS_HINTS[response.status] || fallback, { retryable });
+      const crxHint = !crxFileName && MUST_USE_CRX.test(text) ? USE_CRX_HINT : undefined;
+      throw new ActionError(`${method} ${path} returned HTTP ${response.status}: ${reason}`, crxHint || (detailReason && REASON_HINTS[detailReason]) || STATUS_HINTS[response.status] || fallback, { retryable });
     }
     if (body === undefined || body === null || typeof body !== 'object') {
       throw new ActionError(`${method} ${path} returned a response that is not JSON: ${text.slice(0, 2000)}`);
@@ -234,7 +240,12 @@ export async function publishToStore({
     return { result: 'dry-run', state: '' };
   }
 
-  const upload = await call<UploadResponse>('POST', `/upload/v2/${item}:upload`, { body: zip, timeoutMs: uploadTimeoutMs });
+  const upload = await call<UploadResponse>('POST', `/upload/v2/${item}:upload`, {
+    body: zip,
+    headers: crxFileName ? { 'X-Goog-Upload-Protocol': 'raw', 'X-Goog-Upload-File-Name': crxFileName } : undefined,
+    timeoutMs: uploadTimeoutMs,
+    hint: crxFileName ? CRX_REFUSED_HINT : undefined,
+  });
   if (upload.uploadState === 'SUCCEEDED' && typeof upload.crxVersion === 'string' && upload.crxVersion !== version) {
     throw new ActionError(
       `The store accepted a package with version ${upload.crxVersion}, not ${version}. This run did not submit it.`,
@@ -249,7 +260,9 @@ export async function publishToStore({
     );
   }
   if (state !== 'SUCCEEDED') {
-    throw new ActionError(`Upload of version ${version} ended in state ${state ?? 'unknown'}.`, `Store response: ${JSON.stringify(last).slice(0, 2000)}`);
+    const response = JSON.stringify(last).slice(0, 2000);
+    const hint = crxFileName ? CRX_REFUSED_HINT : MUST_USE_CRX.test(response) ? USE_CRX_HINT : undefined;
+    throw new ActionError(`Upload of version ${version} ended in state ${state ?? 'unknown'}.`, [`Store response: ${response}`, hint].filter(Boolean).join('\n'));
   }
   log(`Uploaded version ${version}.`);
   if (!submit) return { result: 'uploaded', state: '' };
