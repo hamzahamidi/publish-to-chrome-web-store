@@ -232,6 +232,46 @@ Google's guide [Use the Chrome Web Store API](https://developer.chrome.com/docs/
 
 A service account key also works. Grant the service account `roles/iam.serviceAccountTokenCreator` on itself, then pass the key to `google-github-actions/auth` as `credentials_json` in place of `workload_identity_provider`, keeping `service_account`, `token_format` and `access_token_scopes`. A key is a long-lived secret, so prefer federation.
 
+### Moving from PlasmoHQ/bpp
+
+`PlasmoHQ/bpp` publishes to Chrome through API v1.1 ([source](https://github.com/PlasmoHQ/bpp/blob/c15984c0a74f452851c605cab46f34d9fd6cb158/index.js#L71)), which Google supports only until 15 October 2026. Firefox and Edge can stay on bpp:
+
+1. Remove Chrome from the keys passed to bpp. bpp also takes a Chrome package from a `zip` or `file` path inside the keys, or from a shared `zip` or `artifact` input, so dropping `chrome-file` alone is not enough.
+2. Pass the Chrome OAuth client ID, client secret and refresh token from the keys to this action. Both APIs use the `chromewebstore` scope, so the existing refresh token works.
+3. Add the publisher ID, which API v2 requires.
+
+```yaml
+      - id: keys
+        env:
+          BPP_KEYS: ${{ secrets.BPP_KEYS }}
+        run: |
+          # Values taken out of a JSON secret are not masked by GitHub.
+          for field in clientId clientSecret refreshToken; do
+            value=$(jq -er ".chrome.$field" <<< "$BPP_KEYS")
+            echo "::add-mask::$value"
+            echo "$field=$value" >> "$GITHUB_OUTPUT"
+          done
+          others=$(jq -c 'del(.chrome)' <<< "$BPP_KEYS")
+          echo "::add-mask::$others"
+          echo "others=$others" >> "$GITHUB_OUTPUT"
+      - uses: PlasmoHQ/bpp@v3
+        with:
+          keys: ${{ steps.keys.outputs.others }}
+          firefox-file: firefox.zip
+      - uses: hamzahamidi/publish-to-chrome-web-store@v1
+        with:
+          client-id: ${{ steps.keys.outputs.clientId }}
+          client-secret: ${{ steps.keys.outputs.clientSecret }}
+          refresh-token: ${{ steps.keys.outputs.refreshToken }}
+          publisher-id: ${{ vars.CWS_PUBLISHER_ID }}
+          item-id: abcdefghijklmnopabcdefghijklmnop
+          zip: chrome.zip
+```
+
+### Other stores
+
+This action publishes to the Chrome Web Store only, which also serves Brave, Opera and Vivaldi. Firefox Add-ons and Microsoft Edge Add-ons have their own APIs and credentials, so keep a separate step for each.
+
 ## Inputs
 
 | Input | Required | Default | Description |
