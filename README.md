@@ -10,7 +10,7 @@ Publish a Chrome extension from GitHub Actions through the Chrome Web Store API 
 
 ## Quick start
 
-After the [one-time setup](#setting-up-workload-identity-federation) in Google Cloud and the repository settings, add this job to a workflow triggered by your release tags, such as `on: push: tags: ['v*']`:
+After the [one-time setup](#setting-up-workload-identity-federation) in Google Cloud and the repository settings, add this job to a workflow that runs when you push a release tag:
 
 ```yaml
 publish:
