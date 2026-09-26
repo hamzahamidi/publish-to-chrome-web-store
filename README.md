@@ -206,8 +206,8 @@ A service account key also works. Grant the service account `roles/iam.serviceAc
 | `publish` | no | `true` | `false` uploads the package as a draft without submitting it |
 | `dry-run` | no | `false` | `true` stops after the status check and reports what would happen |
 | `deploy-percentage` | no | | Share of users, 0 to 100, who get the version. Needs `publish: true`. See [Partial rollout](#partial-rollout) |
-| `rollout-only` | no | `false` | `true`, with `deploy-percentage` and no `zip` or `crx`, raises the rollout of the newest published version without uploading |
-| `skip-review` | no | `false` | `true` asks the store to publish without review. The store refuses the submission when the change needs review |
+| `rollout-only` | no | `false` | `true`, with `deploy-percentage` and no `zip` or `crx`, raises the rollout of the newest published version without uploading. It cannot be combined with `skip-review`, `block-on-warnings` or `publish-type: staged` |
+| `skip-review` | no | `false` | `true` asks the store to publish without review. The store refuses the submission when the change needs review. Needs `publish: true` |
 | `block-on-warnings` | no | `false` | `true` makes the store refuse the submission when it has warnings. Needs `publish: true` |
 | `publish-type` | no | `default` | `default` makes the version live once it passes review. `staged` holds the approved version until you publish it in the dashboard or with a separate publish call to the API. You have 30 days after approval, then it reverts to a draft and needs a new review. This action does not publish a staged version, even when re-run |
 
@@ -217,7 +217,7 @@ A service account key also works. Grant the service account `roles/iam.serviceAc
 | --- | --- |
 | `result` | `submitted`, `uploaded` (when `publish` is `false`), `skipped` (this version was already in the store, or its rollout already reached `deploy-percentage`), `raised` (the rollout of the published version went up) or `dry-run` (a dry run that would upload or raise) |
 | `state` | Store state of this version at the end, such as `PENDING_REVIEW`, `STAGED` or `PUBLISHED`. Empty when `result` is `uploaded`, or `dry-run` for an upload, or when the store reports no state after submitting |
-| `version` | The version read from `manifest.json` in the ZIP, or with `rollout-only` the published version the run raised |
+| `version` | The version read from `manifest.json` in the ZIP, or with `rollout-only` the newest published version |
 
 ## What it does
 
@@ -361,7 +361,7 @@ The hosts are fixed in the code. There is no input to change them, redirects are
 | [`src/runner.ts`](src/runner.ts) | ~50 | GitHub Actions inputs, outputs, masking and annotations |
 | [`src/errors.ts`](src/errors.ts) | ~20 | The error type for failures shown as an error annotation, and network error wording |
 | [`src/crx.ts`](src/crx.ts) | ~30 | Finds the ZIP inside a CRX3, refusing CRX2 and damaged headers |
-| [`src/sign.ts`](src/sign.ts), [`sign/main.ts`](sign/main.ts) | ~50, ~40 | The `sign` action: CRX3 signing with one RSA proof |
+| [`src/sign.ts`](src/sign.ts), [`sign/main.ts`](sign/main.ts) | ~50, ~50 | The `sign` action: CRX3 signing with one RSA proof |
 
 ### How it is checked
 
