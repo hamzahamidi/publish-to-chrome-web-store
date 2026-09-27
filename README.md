@@ -127,6 +127,8 @@ jobs:
 
 The build runs in its own job, so your build tools and their dependencies never run next to the store token. The publish job only downloads the ZIP, gets the token and runs this action. It waits for approval in the `chrome-web-store` environment, and the concurrency group keeps two releases from uploading at the same time.
 
+When moving an existing release workflow from a refresh token to Workload Identity Federation, change only authentication. Keep the build job unchanged and publish the artifact it already produces. Upload that artifact with `actions/upload-artifact` in the build job, then use `actions/download-artifact` in the publish job, following the example above. See GitHub's [artifact documentation](https://docs.github.com/en/actions/tutorials/store-and-share-data).
+
 The one-time Google Cloud setup is described in [Setting up Workload Identity Federation](#setting-up-workload-identity-federation). With the provider it creates, every run must come from a tag. A run from a branch fails in the `google-github-actions/auth` step, before this action starts, with "The given credential is rejected by the attribute condition".
 
 ### With Verified CRX Uploads (optional)
@@ -368,7 +370,7 @@ gcloud services enable chromewebstore.googleapis.com iam.googleapis.com iamcrede
 gcloud iam service-accounts create cws-publisher --display-name="Chrome Web Store publisher"
 ```
 
-**4. Create an identity pool and a GitHub provider.** The provider accepts a GitHub token only from a tag run of your repository, by owner ID and repository ID, in a job that uses the `chrome-web-store` environment. Any other workflow or branch in the repository is refused.
+**4. Create an identity pool and a GitHub provider.** The provider accepts a GitHub token only from a release tag beginning with `v` in your repository, by owner ID and repository ID, in a job that uses the `chrome-web-store` environment. Any other workflow, tag or branch in the repository is refused.
 
 ```bash
 OWNER_ID=12345678
@@ -378,7 +380,15 @@ gcloud iam workload-identity-pools providers create-oidc github \
   --location=global --workload-identity-pool=cws-publish \
   --issuer-uri="https://token.actions.githubusercontent.com" \
   --attribute-mapping="google.subject=assertion.sub,attribute.repository_id=assertion.repository_id,attribute.repository_owner_id=assertion.repository_owner_id,attribute.ref_type=assertion.ref_type" \
-  --attribute-condition="assertion.repository_owner_id == '$OWNER_ID' && assertion.repository_id == '$REPO_ID' && assertion.ref_type == 'tag' && assertion.environment == 'chrome-web-store'"
+  --attribute-condition="assertion.repository_owner_id == '$OWNER_ID' && assertion.repository_id == '$REPO_ID' && assertion.ref_type == 'tag' && assertion.ref.startsWith('refs/tags/v') && assertion.environment == 'chrome-web-store'"
+```
+
+For an existing provider, update the same condition. Repository IDs, the release ref and the environment are separate checks, and each limits a different part of the trust relationship. The GitHub environment controls approval and deployment rules. The provider condition limits which GitHub token can reach Google Cloud.
+
+```bash
+gcloud iam workload-identity-pools providers update-oidc github \
+  --location=global --workload-identity-pool=cws-publish \
+  --attribute-condition="assertion.repository_owner_id == '$OWNER_ID' && assertion.repository_id == '$REPO_ID' && assertion.ref_type == 'tag' && assertion.ref.startsWith('refs/tags/v') && assertion.environment == 'chrome-web-store'"
 ```
 
 **5. Let that repository act as the service account.** This grants `roles/iam.workloadIdentityUser` on the `cws-publisher` account only, not on the project, to tokens the pool accepted for your repository ID. The last two lines print the values for step 7.
@@ -407,11 +417,19 @@ A tag ruleset that limits who can create release tags narrows it further.
 
 ### Repositories without environments
 
-Environments on private repositories depend on your GitHub plan. Without one, drop `&& assertion.environment == 'chrome-web-store'` from the condition in step 4 and `environment: chrome-web-store` from the job. Then anyone who can push a tag to the repository can publish, so limit who can create tags with a ruleset.
+Environments on private repositories depend on your GitHub plan. Without one, drop `&& assertion.environment == 'chrome-web-store'` from the condition in step 4 and `environment: chrome-web-store` from the job. Keep the repository and release ref checks. Limit who can create release tags with a ruleset.
 
 ### Publishing from a branch
 
-If you release from a branch instead of tags, replace `assertion.ref_type == 'tag'` with `assertion.ref == 'refs/heads/main' && assertion.event_name == 'push'`, using your release branch. Do not remove the ref check: without it, every workflow in the repository can publish, including runs triggered by pull requests.
+If you release from a branch instead of tags, keep an exact ref check and require a push event. For example, to release from `main` in the `chrome-web-store` environment, update the provider condition as follows:
+
+```bash
+gcloud iam workload-identity-pools providers update-oidc github \
+  --location=global --workload-identity-pool=cws-publish \
+  --attribute-condition="assertion.repository_owner_id == '$OWNER_ID' && assertion.repository_id == '$REPO_ID' && assertion.ref == 'refs/heads/main' && assertion.event_name == 'push' && assertion.environment == 'chrome-web-store'"
+```
+
+Use your release branch in place of `main`. Without the ref and event checks, every workflow in the repository could publish, including runs triggered by pull requests.
 
 ## Trust and security
 
