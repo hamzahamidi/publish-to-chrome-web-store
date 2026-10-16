@@ -1,96 +1,54 @@
 # Releases
 
-[Release Please](https://github.com/googleapis/release-please) proposes the next
-version in a pull request. A maintainer reviews the complete diff since the last
-release, the version and the changelog before merging it. The release workflow
-publishes that merged commit after its required CI and CodeQL push jobs succeed, then
-updates the floating major tag.
+[Release Please](https://github.com/googleapis/release-please-action) manages
+version proposals, changelogs, tags, GitHub releases and release PR labels.
+`version.txt` and `.release-please-manifest.json` use its `simple` strategy,
+starting at `1.2.2`. The action runs TypeScript source directly, so no npm package
+or build artifact needs publishing.
 
-## Version decisions
+## Review and publication
 
-`version.txt` and `.release-please-manifest.json` record the same version. The
-action runs TypeScript source directly, so there is no npm package or build
-artifact to publish. The initial version is `1.2.2`, with its released commit as
-the bootstrap boundary.
+1. Merge features and fixes through PRs. The CI workflow runs tests on Linux,
+   Windows and macOS, the mock-store action checks, Chrome signing compatibility,
+   and CodeQL. Its release job depends on all of them succeeding.
+2. Release Please opens or updates a release PR. Review the complete diff since
+   the previous release, its proposed version and its changelog. Use
+   [Semantic Versioning](https://semver.org/) based on compatibility across both
+   actions' inputs, outputs, defaults and runtime requirements. Commit prefixes
+   propose a version; the public compatibility contract determines it.
+3. Approve any bot-created PR workflow runs awaiting approval and review the
+   required checks. Merge the reviewed release PR with its generated
+   `chore(main): release VERSION` title. On that push, after the checks succeed,
+   Release Please publishes the version. Ordinary pushes update proposals without
+   publishing an older pending release candidate.
+4. Inspect the release and the
+   [Marketplace listing](https://github.com/marketplace/actions/publish-to-chrome-web-store).
+   Automatic Marketplace updates through API-created releases remain unverified.
 
-Use [Semantic Versioning](https://semver.org/): compatible fixes increment PATCH,
-compatible features or public API deprecations increment MINOR, and incompatible
-public API changes increment MAJOR. Review both the publishing action and the
-signing action, including their inputs, outputs, defaults and runtime requirements.
-Commit prefixes propose a version; the compatibility impact determines it.
+Documentation, CI and development dependency changes that preserve installed
+behavior do not need a release. To correct a proposed version or request one for
+a change the bot does not detect, use its documented
+[Release-As footer](https://github.com/googleapis/release-please#how-do-i-change-the-version-number).
+This workflow is intended for stable releases. Prereleases need a reviewed
+workflow configuration change first.
 
-`fix:` and `feat:` commits normally produce release proposals. Documentation,
-CI and development dependency changes that preserve installed behavior do not
-need a release. For a compatibility-relevant change that the bot does not detect,
-use the documented [Release-As footer](https://github.com/googleapis/release-please#how-do-i-change-the-version-number)
-to request the reviewed version. To correct an open proposal, use that mechanism
-and let the bot regenerate its manifest, version file and notes before merging.
+## Security and retries
 
-This workflow publishes stable `vMAJOR.MINOR.PATCH` releases only. Prereleases
-need a separate reviewed workflow change before use.
+The default token permission is read-only. Only the release job gets repository
+and PR write permissions, using the short-lived `GITHUB_TOKEN`. Repository
+settings must allow Actions to create PRs and enable immutable releases.
 
-## Release review
+Published exact version tags are immutable. The existing major-tag script runs
+after Release Please and refuses to move `v1` or another major alias to a release
+that is not immutable. It also runs when retrying a successful publication whose
+alias update failed. Release and alias jobs share one concurrency group.
 
-1. Review the complete comparison with the previous immutable release. Check the
-   proposed SemVer version and edit the release notes where needed.
-2. Check that the release PR changes only `CHANGELOG.md`, `version.txt` and
-   `.release-please-manifest.json`. Merge runtime and workflow changes through
-   separate PRs so the release decision has a fixed source diff.
-3. Approve any CI runs awaiting approval on the bot-created PR, then review the
-   required checks before merging. The workflow uses the repository's short-lived
-   `GITHUB_TOKEN`, with no personal access token or separate GitHub App.
-4. Merge the release PR as a human maintainer. Bot merges do not authorize
-   publication. Publication waits for all six CI jobs and both CodeQL
-   jobs to succeed on its exact merge commit. A passing PR run, scheduled run,
-   skipped job or successful run for another commit does not authorize publication.
-5. Inspect the [Release workflow](https://github.com/hamzahamidi/publish-to-chrome-web-store/actions/workflows/release.yml)
-   and the new release. Its title equals its exact tag. Its notes link to the
-   release PR and source commit. Confirm the
-   [Marketplace listing](https://github.com/marketplace/actions/publish-to-chrome-web-store)
-   displays the intended version; publication through the release API has not
-   been verified to update the Marketplace listing automatically.
+For transient failures, rerun the CI workflow for the release commit. If a source
+change is needed, leave that candidate unpublished and resolve its pending release
+PR using Release Please's recovery guidance before preparing the next proposal.
+Do not move an exact version tag or replace published contents.
 
-The bot's PR is a public record of the release decision. A sole maintainer's
-review is not independent two-person approval. Workflow changes need the same
-attention as runtime changes because they control release credentials.
-
-## Publication and recovery
-
-The proposal job cannot publish a release. The publication job reads release
-metadata from the merged PR's SHA, checks its membership in `main`, and verifies
-successful required jobs from push runs of the two expected workflow paths. CI
-and CodeQL each call the reusable release workflow after their required jobs
-succeed. The caller's workflow may still be running its release jobs; all eight
-required test and analysis jobs must already be complete and successful.
-Publication executes only scripts checked out at its triggering `main` commit; it does not
-download artifacts or run code from a triggering PR. Release operations and the
-separate major-tag workflow share one concurrency group.
-
-Exact version tags and published contents are immutable. `v1`, `v2` and later
-major aliases intentionally move to the newest immutable stable release of their
-major. Alias maintenance runs directly after publication because releases created
-with `GITHUB_TOKEN` do not trigger the separate release-event workflow.
-
-The pending release label remains until publication and alias maintenance both
-succeed. If either fails, correct the cause and run the Release workflow manually
-on `main`. It checks CI again and reuses an existing immutable release only when
-its exact tag points to the reviewed commit. It never moves an exact version tag,
-replaces release contents or publishes a second version merely to retry an alias.
-For transient CI failures, rerun the failed push run for the release commit.
-If the source needs a change, leave that version unpublished, remove the pending
-label from the merged release PR, and merge the correction through a separate
-PR. Run the proposal workflow to prepare the next reviewed version. Version
-numbers may be skipped; a failed candidate does not authorize bypassing checks.
-
-Repository settings must allow Actions to create pull requests, while default
-workflow permissions remain read-only. Enable immutable releases before
-publication. An API or permission failure stops publication or alias maintenance;
-it does not justify adding a long-lived token. GitHub can refuse tag changes when
-an older release commit's workflow files differ from current `main`; resolve the
-workflow difference through reviewed changes before retrying.
-
-For security-sensitive consumers, pin the full commit SHA shown by an immutable
-release and use [Dependabot](https://docs.github.com/en/code-security/dependabot)
-for reviewed updates. A floating major alias selects compatible updates but is
-not a fixed source reference. CI, CodeQL and Scorecard provide evidence about
-checks and practices, not a guarantee that a release is safe.
+Security-sensitive consumers should pin the full commit SHA of an immutable
+release. A major alias intentionally follows compatible releases. A maintainer
+reviewing a bot-created release PR provides a public decision record, rather than
+independent two-person approval.

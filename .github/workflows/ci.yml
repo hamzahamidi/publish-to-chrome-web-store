@@ -111,16 +111,51 @@ jobs:
           VERSION: ${{ steps.publish.outputs.version }}
         run: node test/self-test.ts verify-crx
 
-  release:
-    name: Release after CI
-    needs: [test, action, chrome-packer, crx-action]
+  codeql:
+    name: CodeQL
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
-      actions: read
+      contents: read
+      security-events: write
+    uses: ./.github/workflows/codeql.yml
+
+  release:
+    name: Release
+    needs: [test, action, chrome-packer, crx-action, codeql]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: move-major-tag
+      cancel-in-progress: false
+    permissions:
       contents: write
       issues: write
       pull-requests: write
-    uses: ./.github/workflows/release.yml
-    with:
-      publish: true
-
+    steps:
+      - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4
+        id: release
+        with:
+          target-branch: main
+          skip-github-release: >-
+            ${{ !startsWith(github.event.head_commit.message, 'chore(main): release ') }}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/move-major-tag.ts
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Point the major alias at the latest immutable release
+        env:
+          TAG: ${{ steps.release.outputs.tag_name }}
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -z "$TAG" ]; then
+            TAG="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"
+          fi
+          export TAG
+          node scripts/move-major-tag.ts
