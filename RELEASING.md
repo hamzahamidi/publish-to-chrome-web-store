@@ -41,7 +41,8 @@ settings must allow Actions to create PRs and enable immutable releases.
 Published exact version tags are immutable. The existing major-tag script runs
 after Release Please and refuses to move `v1` or another major alias to a release
 that is not immutable. It also runs when retrying a successful publication whose
-alias update failed. Release and alias jobs share one concurrency group.
+alias update failed, using the triggering commit's `version.txt` on retries.
+Release and alias jobs share one concurrency group with a queue of up to 100 jobs.
 
 For transient failures, rerun the CI workflow for the release commit. If a source
 change is needed, leave that candidate unpublished and resolve its pending release

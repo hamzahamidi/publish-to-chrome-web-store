@@ -128,6 +128,7 @@ jobs:
     concurrency:
       group: move-major-tag
       cancel-in-progress: false
+      queue: max
     permissions:
       contents: write
       issues: write
@@ -142,7 +143,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          sparse-checkout: scripts/move-major-tag.ts
+          sparse-checkout: |
+            scripts/move-major-tag.ts
+            version.txt
           sparse-checkout-cone-mode: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -152,10 +155,9 @@ jobs:
         env:
           TAG: ${{ steps.release.outputs.tag_name }}
           GITHUB_TOKEN: ${{ github.token }}
-          GH_TOKEN: ${{ github.token }}
         run: |
           if [ -z "$TAG" ]; then
-            TAG="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"
+            TAG="v$(cat version.txt)"
           fi
           export TAG
           node scripts/move-major-tag.ts
