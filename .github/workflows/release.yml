@@ -1,0 +1,81 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_call:
+    inputs:
+      publish:
+        type: boolean
+        required: true
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: move-major-tag
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish the tested release commit
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'push' && inputs.publish == true))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: write
+      issues: write
+      pull-requests: read
+    outputs:
+      tag: ${{ steps.publish.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout: scripts
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: Publish after exact-commit CI and CodeQL
+        id: publish
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/publish-release.ts
+      - name: Move the major alias after immutable publication
+        if: steps.publish.outputs.tag != ''
+        env:
+          TAG: ${{ steps.publish.outputs.tag }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/move-major-tag.ts
+      - name: Mark the release PR as published
+        if: steps.publish.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ steps.publish.outputs.pr }}
+        run: |
+          gh label create 'autorelease: tagged' --color 0e8a16 --description 'Published immutable release' --force
+          gh issue edit "$PR" --add-label 'autorelease: tagged' --remove-label 'autorelease: pending'
+
+  propose:
+    name: Propose the next release
+    needs: publish
+    if: >-
+      always() && !cancelled() && github.ref == 'refs/heads/main' &&
+      (needs.publish.result == 'skipped' || needs.publish.result == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4
+        with:
+          target-branch: main
+          skip-github-release: true

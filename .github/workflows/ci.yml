@@ -111,3 +111,16 @@ jobs:
           VERSION: ${{ steps.publish.outputs.version }}
         run: node test/self-test.ts verify-crx
 
+  release:
+    name: Release after CI
+    needs: [test, action, chrome-packer, crx-action]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      actions: read
+      contents: write
+      issues: write
+      pull-requests: write
+    uses: ./.github/workflows/release.yml
+    with:
+      publish: true
+
