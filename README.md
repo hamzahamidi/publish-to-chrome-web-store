@@ -2,7 +2,6 @@
 
 [![CI](https://github.com/hamzahamidi/publish-to-chrome-web-store/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/hamzahamidi/publish-to-chrome-web-store/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/hamzahamidi/publish-to-chrome-web-store/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/hamzahamidi/publish-to-chrome-web-store/actions/workflows/codeql.yml)
-[![codecov](https://codecov.io/gh/hamzahamidi/publish-to-chrome-web-store/branch/main/graph/badge.svg)](https://codecov.io/gh/hamzahamidi/publish-to-chrome-web-store)
 [![GitHub Marketplace](https://img.shields.io/github/v/release/hamzahamidi/publish-to-chrome-web-store?label=Marketplace&logo=github)](https://github.com/marketplace/actions/publish-to-chrome-web-store)
 [![runtime deps](https://img.shields.io/badge/runtime%20deps-0-2ea44f)](package.json)
 [![license](https://img.shields.io/github/license/hamzahamidi/publish-to-chrome-web-store)](LICENSE)
@@ -469,7 +468,7 @@ The hosts are fixed in the code. There is no input to change them, redirects are
 
 ### How it is checked
 
-- Every pull request type-checks the code and runs the tests on Linux, Windows and macOS with a coverage floor of 95% of lines. The tests start the action's entry point against a mock store on all three, and two separate jobs run the action from `action.yml`: one uploads a ZIP, the other signs a CRX with `sign/action.yml` and uploads it. See [ci.yml](.github/workflows/ci.yml). The Linux run reports coverage to [Codecov](https://codecov.io/gh/hamzahamidi/publish-to-chrome-web-store) with a short-lived token, like the store route.
+- Every pull request type-checks the code and runs the tests on Linux, Windows and macOS with a coverage floor of 95% of lines. The tests start the action's entry point against a mock store on all three, and two separate jobs run the action from `action.yml`: one uploads a ZIP, the other signs a CRX with `sign/action.yml` and uploads it. See [ci.yml](.github/workflows/ci.yml).
 - [OpenSSF Scorecard](.github/workflows/scorecard.yml) checks the repository's security practices on every push to `main` and weekly, and publishes the result.
 - [CodeQL](.github/workflows/codeql.yml) scans the JavaScript and the workflows on every pull request, every push to `main` and weekly. Dependabot keeps the workflow actions current.
 - [Release PRs](RELEASING.md) expose the proposed version and changelog for maintainer review. The release job waits for tests and CodeQL on the release merge. Release Please manages tags, release notes and release labels.

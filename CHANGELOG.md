@@ -4,7 +4,7 @@
 
 - The publish and sign actions refuse a `zip` or `crx` path that is not a regular file, such as a named pipe or a device, before reading it.
 - The README adds a migration path from PlasmoHQ/bpp, names the Firefox and Edge sibling actions, and shows CI, CodeQL and coverage badges. llms.txt follows.
-- Workflow actions are pinned to commit SHAs, coverage goes to Codecov through OIDC, and OpenSSF Scorecard runs weekly.
+- Workflow actions are pinned to commit SHAs, CI enforces coverage floors, and OpenSSF Scorecard runs weekly.
 
 ## 1.2.1
 
